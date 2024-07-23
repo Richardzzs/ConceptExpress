@@ -1198,6 +1198,7 @@ class ConceptExpress:
                         ).input_ids
 
                         # Get the text embedding for conditioning
+                        null_input_ids = null_input_ids.to(latents.device)
                         encoder_hidden_states = self.text_encoder(null_input_ids)[0]
 
                         # Predict the noise residual
@@ -1325,6 +1326,7 @@ class ConceptExpress:
                         )
 
                         # Get the text embedding for conditioning
+                        prompt_ids = prompt_ids.to(latents.device)
                         encoder_hidden_states = self.text_encoder(prompt_ids)[0]
                         # Predict the noise residual
                         model_pred = self.unet(
