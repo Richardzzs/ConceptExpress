@@ -26,12 +26,19 @@ class SupConLoss(nn.Module):
         elif labels is None and mask is None:
             mask = torch.eye(batch_size, dtype=torch.float32).to(device)
         elif labels is not None:
-            labels = labels.contiguous().view(-1, 1)
+            labels = labels.contiguous().view(-1, 1) #  一维张量转化为二维张量
             if labels.shape[0] != batch_size:
                 raise ValueError('Num of labels does not match num of features')
-            mask = torch.eq(labels, labels.T).float().to(device)
+            mask = torch.eq(labels, labels.T).float().to(device)  # 创建一个与 labels 相同大小的布尔矩阵 mask，True False转化为1 0
         else:
             mask = mask.float().to(device)
+        # torch.Size([10, 10])
+        print("="*30)
+        print("mask")
+        print(type(mask))
+        print(mask.shape)
+        print(mask)
+        print("="*30)
 
         contrast_count = features.shape[1]
         contrast_feature = torch.cat(torch.unbind(features, dim=1), dim=0)
