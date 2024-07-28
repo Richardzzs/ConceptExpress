@@ -49,7 +49,7 @@ import torchvision.transforms as T
 from clustering.finch import FINCH
 from scipy.optimize import linear_sum_assignment as linear_assignment 
 from infer import infer_with_embed
-from utils.loss import SupConLoss
+from utils.loss import SupConLoss, SupKLDiergence
 from utils.pca import pca_visual
 import json
 
@@ -1134,6 +1134,8 @@ class ConceptExpress:
         self.contrastive_loss = SupConLoss(temperature=self.args.temperature, 
                                            base_temperature=self.args.temperature)
         
+        self.kl_divergence_diff = SupKLDiergence()
+        
         for epoch in range(first_epoch, self.args.num_train_epochs):
             self.unet.train()
             if self.args.train_text_encoder:
@@ -1494,6 +1496,11 @@ class ConceptExpress:
                             print("="*30)
                              
                             loss += loss_con * self.args.weight_contrast
+
+                            # KL Divergence difference between same label and different label
+                            kl_d_diff = self.kl_divergence_diff(sample_embeddings_normalized, labels=label)
+
+                            loss += kl_d_diff * self.args.weight_contrast
 
                         self.accelerator.backward(loss)
 
