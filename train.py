@@ -1440,67 +1440,75 @@ class ConceptExpress:
                             # 2 cluster, len = 10
                             # [['<asset0>'], ['<asset1>'], ... , ['<asset8>'], ['<asset9>']]
                             # 4 cluster, len = 20 ?
-                            print("="*30)
-                            print("tokens_to_use_list")
-                            print(type(tokens_to_use_list))
-                            print(len(tokens_to_use_list))
-                            print(tokens_to_use_list)
-                            print("="*30)
+                            # print("="*30)
+                            # print("tokens_to_use_list")
+                            # print(type(tokens_to_use_list))
+                            # print(len(tokens_to_use_list))
+                            # print(tokens_to_use_list)
+                            # print("="*30)
 
                             # torch.Size([1, 10])
-                            print("="*30)
-                            print("converted_ids")
-                            print(type(converted_ids))
-                            print(converted_ids.shape)
-                            print(converted_ids)
-                            print("="*30)
+                            # print("="*30)
+                            # print("converted_ids")
+                            # print(type(converted_ids))
+                            # print(converted_ids.shape)
+                            # print(converted_ids)
+                            # print("="*30)
 
                             sample_embeddings = self.accelerator.unwrap_model(
                                         self.text_encoder
                                     ).get_input_embeddings()(converted_ids.to(self.text_encoder.device))[0] # get_input_embeddings() 获取模型的输入嵌入层
                             # torch.Size([10, 1024])
-                            print("="*30)
-                            print("sample_embeddings")
-                            print(type(sample_embeddings))
-                            print(sample_embeddings.shape)
-                            print(sample_embeddings)
-                            print("="*30)
+                            # print("="*30)
+                            # print("sample_embeddings")
+                            # print(type(sample_embeddings))
+                            # print(sample_embeddings.shape)
+                            # print(sample_embeddings)
+                            # print("="*30)
 
                             label = torch.tensor(
                                 list(range(self.token_manager.get_token_num())) * self.args.num_split_tokens, dtype=torch.int
                                 ).to(sample_embeddings.device)
                             # torch.Size([10])
                             # tensor([0, 1, 0, 1, 0, 1, 0, 1, 0, 1], device='cuda:0', dtype=torch.int32)
-                            print("="*30)
-                            print("label")
-                            print(type(label))
-                            print(label.shape)
-                            print(label)
-                            print("="*30)
+                            # print("="*30)
+                            # print("label")
+                            # print(type(label))
+                            # print(label.shape)
+                            # print(label)
+                            # print("="*30)
                             
                             sample_embeddings_normalized = F.normalize(sample_embeddings.unsqueeze(1), p=2, dim=-1)
                             # torch.Size([10, 1, 1024])
-                            print("="*30)
-                            print("sample_embeddings_normalized")
-                            print(type(sample_embeddings_normalized))
-                            print(sample_embeddings_normalized.shape)
-                            print(sample_embeddings_normalized)
-                            print("="*30)
+                            # print("="*30)
+                            # print("sample_embeddings_normalized")
+                            # print(type(sample_embeddings_normalized))
+                            # print(sample_embeddings_normalized.shape)
+                            # print(sample_embeddings_normalized)
+                            # print("="*30)
                             
-                            loss_con = self.contrastive_loss(sample_embeddings_normalized, labels=label)  # sample_embeddings_normalized就是loss.py中的feature
-                            print("="*30)
-                            print("loss_con")
-                            print(type(loss_con))
-                            print(loss_con.size)
-                            print(loss_con)
-                            print("="*30)
+                            ########################
+                            ### Contrastive loss ###
+                            ########################
+
+                            # loss_con = self.contrastive_loss(sample_embeddings_normalized, labels=label)  # sample_embeddings_normalized就是loss.py中的feature
+                            # # print("="*30)
+                            # # print("loss_con")
+                            # # print(type(loss_con))
+                            # # print(loss_con.size)
+                            # # print(loss_con)
+                            # # print("="*30)
                              
-                            loss += loss_con * self.args.weight_contrast
+                            # loss += loss_con * self.args.weight_contrast
+
+                            ########################
+                            #### KL Diveregence ####
+                            ########################
 
                             # KL Divergence difference between same label and different label
                             kl_d_diff = self.kl_divergence_diff(sample_embeddings_normalized, labels=label)
 
-                            loss += kl_d_diff * self.args.weight_contrast
+                            loss += kl_d_diff * self.args.weight_contrast                      
 
                         self.accelerator.backward(loss)
 
