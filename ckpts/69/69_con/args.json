@@ -8,7 +8,7 @@
   "with_prior_preservation": false,
   "prior_loss_weight": 1.0,
   "num_class_images": 100,
-  "output_dir": "ckpts/69",
+  "output_dir": "ckpts/69/69_con",
   "seed": 20,
   "resolution": 512,
   "center_crop": false,
