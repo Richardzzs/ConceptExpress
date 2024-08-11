@@ -177,9 +177,6 @@ class SupKLDiergence(nn.Module):
 
         # 初始化相同标签的KL散度之和
         same_label_kl_sum = 0.0
-        
-        # 获取点的数量
-        num_points = len(prob_dist)
 
         # 对于每个标签组，计算KL散度之和
         for i in torch.unique(labels):
@@ -191,16 +188,11 @@ class SupKLDiergence(nn.Module):
                 for k in range(j + 1, len(indices)):
                     p = prob_dist[indices[j]]
                     q = prob_dist[indices[k]]
-                    kl_div = F.kl_div(p, q, reduction='sum')
-                    same_label_kl_sum += kl_div.item()
-                    kl_div_asymmetric = F.kl_div(q, p, reduction='sum')
-                    same_label_kl_sum += kl_div_asymmetric.item()
-        
-        # 计算点对的数量
-        num_pairs = num_points * (num_points - 1) // 2
+                    kl_div = (F.kl_div(p.log(), q, reduction='batchmean') + F.kl_div(q.log(), p, reduction='batchmean')) / 2
+                    same_label_kl_sum += kl_div
 
-        # 计算期望KL散度
-        same_expected_kl = same_label_kl_sum / num_pairs
+        # 转换为常量
+        same_label_kl_sum = same_label_kl_sum.item()
 
         # 初始化不同标签的KL散度之和
         diff_label_kl_sum = 0.0
@@ -211,28 +203,12 @@ class SupKLDiergence(nn.Module):
                 if labels[i] != labels[j]:  # 确保点对的标签不同
                     p = prob_dist[i]
                     q = prob_dist[j]
-                    kl_div = F.kl_div(p, q, reduction='sum')
-                    diff_label_kl_sum += kl_div.item()
-                    kl_div_asymmetric = F.kl_div(q, p, reduction='sum')
-                    diff_label_kl_sum += kl_div_asymmetric.item()
-        
-        # 计算不同标签点对的数量
-        num_points = len(anchor_feature)
-        num_diff_label_pairs = 0
-        for i in range(num_points):
-            for j in range(i + 1, num_points):
-                if labels[i] != labels[j]:
-                    num_diff_label_pairs += 1
-
-        # 计算期望KL散度
-        diff_expected_kl = diff_label_kl_sum / num_diff_label_pairs
-
-        # # compute KL Distance
-        # d_kl_1 = kld_distance(anchor_feature * mask, anchor_feature * ~mask)
-        # d_kl_2 = kld_distance(anchor_feature * ~mask, anchor_feature * mask)
-        # kl_div = (d_kl_1 + d_kl_2) / 2
+                    kl_div = (F.kl_div(p, q, reduction='batchmean') + F.kl_div(q, p, reduction='batchmean')) / 2
+                    diff_label_kl_sum += kl_div
+        # 转换为常量
+        diff_label_kl_sum = diff_label_kl_sum.item()
 
         # print("@"*30)
-        # print(same_label_kl_sum - diff_label_kl_sum)
+        print(same_label_kl_sum / diff_label_kl_sum)
         # print("@"*30)
-        return same_expected_kl - diff_expected_kl
+        return same_label_kl_sum / diff_label_kl_sum
