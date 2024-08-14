@@ -26,7 +26,7 @@ import diffusers
 import transformers
 from accelerate import Accelerator
 from accelerate.logging import get_logger
-from accelerate.utils import set_seed
+from accelerate.utils import set_seed, ProjectConfiguration
 from diffusers import (
     AutoencoderKL,
     DDPMScheduler,
@@ -769,11 +769,13 @@ class ConceptExpress:
     def main(self):
         logging_dir = Path(self.args.output_dir, self.args.logging_dir)
 
+        config = ProjectConfiguration(project_dir=".", logging_dir=self.args.logging_dir)
         self.accelerator = Accelerator(
             gradient_accumulation_steps=self.args.gradient_accumulation_steps,
             mixed_precision=self.args.mixed_precision,
             log_with=self.args.report_to,
             logging_dir=logging_dir,
+            project_config=config
         )
 
         if (
@@ -1491,7 +1493,7 @@ class ConceptExpress:
                             ### Contrastive loss ###
                             ########################
 
-                            # loss_con = self.contrastive_loss(sample_embeddings_normalized, labels=label)  # sample_embeddings_normalized就是loss.py中的feature
+                            loss_con = self.contrastive_loss(sample_embeddings_normalized, labels=label)  # sample_embeddings_normalized就是loss.py中的feature
                             # # print("="*30)
                             # # print("loss_con")
                             # # print(type(loss_con))
@@ -1499,16 +1501,16 @@ class ConceptExpress:
                             # # print(loss_con)
                             # # print("="*30)
                              
-                            # loss += loss_con * self.args.weight_contrast
+                            loss += loss_con * self.args.weight_contrast
 
                             ########################
                             #### KL Diveregence ####
                             ########################
 
                             # KL Divergence difference between same label and different label
-                            kl_d_diff = self.kl_divergence_diff(sample_embeddings_normalized, labels=label)
+                            # loss_kl = self.kl_divergence_diff(sample_embeddings_normalized, labels=label)
 
-                            loss += kl_d_diff * self.args.weight_contrast                      
+                            # loss += loss_kl * self.args.weight_contrast                      
 
                         self.accelerator.backward(loss)
 

@@ -126,7 +126,7 @@ class SupConLoss(nn.Module):
         # loss
         loss = - (self.temperature / self.base_temperature) * mean_log_prob_pos
         loss = loss.view(anchor_count, batch_size).mean()  # normalize
-
+        # print(loss)
         return loss
     
 
@@ -171,13 +171,13 @@ class SupKLDiergence(nn.Module):
             raise ValueError('Unknown mode: {}'.format(self.contrast_mode))
 
         # 将 v 转换为概率分布，使用 softmax 函数
-        prob_dist = F.softmax(anchor_feature, dim=1)
+        prob_dist = F.softmax(anchor_feature, dim=1).to(device)
         
         # 将 label 转换为一个索引张量，用于后续操作
-        label_indices = torch.unique(labels, return_inverse=True)[1]
+        label_indices = torch.unique(labels, return_inverse=True)[1].to(device)
 
         # 初始化相同标签的KL散度之和
-        same_label_kl_sum = 0.0
+        same_label_kl_sum = torch.tensor(0).to(device)
 
         # 对于每个标签组，计算KL散度之和
         for i in torch.unique(labels):
@@ -189,14 +189,14 @@ class SupKLDiergence(nn.Module):
                 for k in range(j + 1, len(indices)):
                     p = prob_dist[indices[j]]
                     q = prob_dist[indices[k]]
-                    kl_div = (F.kl_div(p.log(), q, reduction='batchmean') + F.kl_div(q.log(), p, reduction='batchmean')) / 2
-                    same_label_kl_sum += kl_div
+                    kl_div = torch.div((F.kl_div(torch.log(p), q, reduction='batchmean') + F.kl_div(torch.log(q), p, reduction='batchmean')), 2)
+                    same_label_kl_sum = torch.add(same_label_kl_sum, kl_div)
 
-        # 转换为常量
-        same_label_kl_sum = same_label_kl_sum.item()
+        # # 转换为常量
+        # same_label_kl_sum = same_label_kl_sum.item()
 
         # 初始化不同标签的KL散度之和
-        diff_label_kl_sum = 0.0
+        diff_label_kl_sum = torch.tensor(0).to(device)
 
         # 遍历所有点对，计算不同标签的KL散度之和
         for i in range(len(anchor_feature)):
@@ -204,12 +204,13 @@ class SupKLDiergence(nn.Module):
                 if labels[i] != labels[j]:  # 确保点对的标签不同
                     p = prob_dist[i]
                     q = prob_dist[j]
-                    kl_div = (F.kl_div(p.log(), q, reduction='batchmean') + F.kl_div(q.log(), p, reduction='batchmean')) / 2
-                    diff_label_kl_sum += kl_div
+                    kl_div = torch.div((F.kl_div(torch.log(p), q, reduction='batchmean') + F.kl_div(torch.log(q), p, reduction='batchmean')), 2)
+                    diff_label_kl_sum = torch.add(diff_label_kl_sum, kl_div)
         # 转换为常量
-        diff_label_kl_sum = diff_label_kl_sum.item()
+        # diff_label_kl_sum = diff_label_kl_sum.item()
 
+        loss = torch.div(same_label_kl_sum, diff_label_kl_sum)
         # print("@"*30)
-        print(same_label_kl_sum - diff_label_kl_sum)
+        print(loss)
         # print("@"*30)
-        return same_label_kl_sum - diff_label_kl_sum
+        return loss

@@ -9,3 +9,9 @@ python infer.py \
   --prompt "a photo of <asset1> in the snow" \
   --save_path output/69 \
   --seed 0
+
+python infer.py \
+  --embed_path ckpts/65/65_con/learned_embeds_final.bin \
+  --prompt "a photo of <asset0>" \
+  --save_path output_65/65_con_asset_0 \
+  --seed 0
