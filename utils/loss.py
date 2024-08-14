@@ -204,12 +204,12 @@ class SupKLDiergence(nn.Module):
                 if labels[i] != labels[j]:  # 确保点对的标签不同
                     p = prob_dist[i]
                     q = prob_dist[j]
-                    kl_div = (F.kl_div(p, q, reduction='batchmean') + F.kl_div(q, p, reduction='batchmean')) / 2
+                    kl_div = (F.kl_div(p.log(), q, reduction='batchmean') + F.kl_div(q.log(), p, reduction='batchmean')) / 2
                     diff_label_kl_sum += kl_div
         # 转换为常量
         diff_label_kl_sum = diff_label_kl_sum.item()
 
         # print("@"*30)
-        print(same_label_kl_sum / diff_label_kl_sum)
+        print(same_label_kl_sum - diff_label_kl_sum)
         # print("@"*30)
-        return same_label_kl_sum / diff_label_kl_sum
+        return same_label_kl_sum - diff_label_kl_sum

@@ -1491,7 +1491,7 @@ class ConceptExpress:
                             ### Contrastive loss ###
                             ########################
 
-                            loss_con = self.contrastive_loss(sample_embeddings_normalized, labels=label)  # sample_embeddings_normalized就是loss.py中的feature
+                            # loss_con = self.contrastive_loss(sample_embeddings_normalized, labels=label)  # sample_embeddings_normalized就是loss.py中的feature
                             # # print("="*30)
                             # # print("loss_con")
                             # # print(type(loss_con))
@@ -1499,16 +1499,16 @@ class ConceptExpress:
                             # # print(loss_con)
                             # # print("="*30)
                              
-                            loss += loss_con * self.args.weight_contrast
+                            # loss += loss_con * self.args.weight_contrast
 
                             ########################
                             #### KL Diveregence ####
                             ########################
 
                             # KL Divergence difference between same label and different label
-                            # kl_d_diff = self.kl_divergence_diff(sample_embeddings_normalized, labels=label)
+                            kl_d_diff = self.kl_divergence_diff(sample_embeddings_normalized, labels=label)
 
-                            # loss += kl_d_diff * self.args.weight_contrast                      
+                            loss += kl_d_diff * self.args.weight_contrast                      
 
                         self.accelerator.backward(loss)
 
