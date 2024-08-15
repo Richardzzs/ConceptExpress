@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from ptp_utils import kld_distance
+import numpy as np
 
 class SupConLoss(nn.Module):
     def __init__(self, temperature=0.07, contrast_mode='one',
@@ -126,7 +127,7 @@ class SupConLoss(nn.Module):
         # loss
         loss = - (self.temperature / self.base_temperature) * mean_log_prob_pos
         loss = loss.view(anchor_count, batch_size).mean()  # normalize
-        # print(loss)
+        print(loss)
         return loss
     
 
@@ -169,9 +170,18 @@ class SupKLDiergence(nn.Module):
             anchor_count = contrast_count
         else:
             raise ValueError('Unknown mode: {}'.format(self.contrast_mode))
+        
+        # print(anchor_feature.shape)
+        # print(anchor_feature)
+        # print(anchor_feature[0])
+        # print(np.sum(anchor_feature.detach().cpu().numpy(), axis=1))
 
         # 将 v 转换为概率分布，使用 softmax 函数
-        prob_dist = F.softmax(anchor_feature, dim=1).to(device)
+        prob_dist = F.softmax(anchor_feature, dim=1).to(device)  # torch.Size([20, 1024]), 每行的和为1，因为是概率分布
+        # print(prob_dist.shape)
+        # print(prob_dist)
+        # print(prob_dist[0])
+        # print(np.sum(prob_dist.detach().cpu().numpy(), axis=1))
         
         # 将 label 转换为一个索引张量，用于后续操作
         label_indices = torch.unique(labels, return_inverse=True)[1].to(device)
@@ -211,6 +221,6 @@ class SupKLDiergence(nn.Module):
 
         loss = torch.div(same_label_kl_sum, diff_label_kl_sum)
         # print("@"*30)
-        print(loss)
+        # print(loss)
         # print("@"*30)
         return loss

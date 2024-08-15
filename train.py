@@ -769,13 +769,13 @@ class ConceptExpress:
     def main(self):
         logging_dir = Path(self.args.output_dir, self.args.logging_dir)
 
-        config = ProjectConfiguration(project_dir=".", logging_dir=self.args.logging_dir)
+        # config = ProjectConfiguration(project_dir=".", logging_dir=self.args.logging_dir)
         self.accelerator = Accelerator(
             gradient_accumulation_steps=self.args.gradient_accumulation_steps,
             mixed_precision=self.args.mixed_precision,
             log_with=self.args.report_to,
-            logging_dir=logging_dir,
-            project_config=config
+            logging_dir=logging_dir
+            # project_config=config
         )
 
         if (
@@ -1481,6 +1481,7 @@ class ConceptExpress:
                             # print("="*30)
                             
                             sample_embeddings_normalized = F.normalize(sample_embeddings.unsqueeze(1), p=2, dim=-1)
+                            # sample_embeddings_normalized = torch.abs(F.normalize(sample_embeddings.unsqueeze(1), p=2, dim=-1))
                             # torch.Size([10, 1, 1024])
                             # print("="*30)
                             # print("sample_embeddings_normalized")
