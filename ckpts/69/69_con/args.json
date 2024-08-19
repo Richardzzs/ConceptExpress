@@ -49,7 +49,7 @@
   "lambda_attention": 1e-05,
   "img_log_steps": 200,
   "num_of_assets": 50,
-  "initializer_tokens": [],
+  "initializer_tokens": "",
   "placeholder_token": "<asset>",
   "apply_masked_loss": true,
   "log_checkpoints": false,

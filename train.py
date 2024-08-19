@@ -425,7 +425,7 @@ def parse_args(input_args=None):
     parser.add_argument("--lambda_attention", type=float, default=1e-2)
     parser.add_argument("--img_log_steps", type=int, default=200)
     parser.add_argument("--num_of_assets", type=int, default=1)
-    parser.add_argument("--initializer_tokens", type=str, nargs="+", default=[])
+    parser.add_argument("--initializer_tokens", type=str, nargs="+", default='')
     parser.add_argument(
         "--placeholder_token",
         type=str,
@@ -496,7 +496,7 @@ def parse_args(input_args=None):
     else:
         args = parser.parse_args()
 
-    args.initializer_tokens = []
+    args.initializer_tokens = ''
    
     assert len(args.initializer_tokens) == 0 or len(args.initializer_tokens) == args.num_of_assets
     args.max_train_steps = args.phase1_train_steps + args.phase2_train_steps
@@ -769,13 +769,11 @@ class ConceptExpress:
     def main(self):
         logging_dir = Path(self.args.output_dir, self.args.logging_dir)
 
-        # config = ProjectConfiguration(project_dir=".", logging_dir=self.args.logging_dir)
         self.accelerator = Accelerator(
             gradient_accumulation_steps=self.args.gradient_accumulation_steps,
             mixed_precision=self.args.mixed_precision,
             log_with=self.args.report_to,
             logging_dir=logging_dir
-            # project_config=config
         )
 
         if (
@@ -1480,8 +1478,8 @@ class ConceptExpress:
                             # print(label)
                             # print("="*30)
                             
-                            sample_embeddings_normalized = F.normalize(sample_embeddings.unsqueeze(1), p=2, dim=-1)
-                            # sample_embeddings_normalized = torch.abs(F.normalize(sample_embeddings.unsqueeze(1), p=2, dim=-1))
+                            # sample_embeddings_normalized = F.normalize(sample_embeddings.unsqueeze(1), p=2, dim=-1)
+                            sample_embeddings_normalized = torch.abs(F.normalize(sample_embeddings.unsqueeze(1), p=2, dim=-1))
                             # torch.Size([10, 1, 1024])
                             # print("="*30)
                             # print("sample_embeddings_normalized")
