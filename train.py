@@ -1480,8 +1480,8 @@ class ConceptExpress:
                             # print(label)
                             # print("="*30)
                             
-                            sample_embeddings_normalized = F.normalize(sample_embeddings.unsqueeze(1), p=2, dim=-1)
-                            # sample_embeddings_normalized = torch.abs(F.normalize(sample_embeddings.unsqueeze(1), p=2, dim=-1))
+                            # sample_embeddings_normalized = F.normalize(sample_embeddings.unsqueeze(1), p=2, dim=-1)
+                            sample_embeddings_normalized = torch.abs(F.normalize(sample_embeddings.unsqueeze(1), p=2, dim=-1))
                             # torch.Size([10, 1, 1024])
                             # print("="*30)
                             # print("sample_embeddings_normalized")
