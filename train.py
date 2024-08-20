@@ -1433,6 +1433,8 @@ class ConceptExpress:
                         
                         logs["attn_loss"] = attn_loss.detach().item()
                         loss += attn_loss
+
+                        loss_con_list = torch.tensor(0)
                         
                         if self.token_manager.split_state:
                             converted_ids = self.tokenizer.encode([i[0] for i in tokens_to_use_list], 
@@ -1478,8 +1480,8 @@ class ConceptExpress:
                             # print(label)
                             # print("="*30)
                             
-                            # sample_embeddings_normalized = F.normalize(sample_embeddings.unsqueeze(1), p=2, dim=-1)
-                            sample_embeddings_normalized = torch.abs(F.normalize(sample_embeddings.unsqueeze(1), p=2, dim=-1))
+                            sample_embeddings_normalized = F.normalize(sample_embeddings.unsqueeze(1), p=2, dim=-1)
+                            # sample_embeddings_normalized = torch.abs(F.normalize(sample_embeddings.unsqueeze(1), p=2, dim=-1))
                             # torch.Size([10, 1, 1024])
                             # print("="*30)
                             # print("sample_embeddings_normalized")
