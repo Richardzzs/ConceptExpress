@@ -4,7 +4,7 @@ from transformers import AutoProcessor, CLIPModel
 # import torch.nn
 
 path_ori = "./uce_images/69/img.jpg"
-path_gen = "./ckpts/69/69_con_ori/images/A-photo-of-<asset0>-and-<asset1>-step-500.png"
+path_gen = "./ckpts/69/69_con_ori_abs/images/A-photo-of-<asset0>-and-<asset1>-step-500.png"
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 processor = AutoProcessor.from_pretrained("openai/clip-vit-base-patch32")
