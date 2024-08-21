@@ -1131,7 +1131,7 @@ class ConceptExpress:
         
         self.token_manager = TokenManager(self.placeholder_tokens, self.tokenizer, self.args.num_split_tokens)
         
-        self.contrastive_loss = SupConLoss(temperature=self.args.temperature, 
+        self.contrastive_loss = SupConLoss(mode="con_kl", temperature=self.args.temperature, 
                                            base_temperature=self.args.temperature)
         
         self.kl_divergence_diff = SupKLDiergence()

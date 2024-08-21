@@ -5,11 +5,12 @@ from ptp_utils import kld_distance
 import numpy as np
 
 class SupConLoss(nn.Module):
-    def __init__(self, temperature=0.07, contrast_mode='one',
+    def __init__(self, temperature=0.07, contrast_mode='one', mode='con',
                  base_temperature=0.07):
         super(SupConLoss, self).__init__()
         self.temperature = temperature
         self.contrast_mode = contrast_mode
+        self.mode = mode
         self.base_temperature = base_temperature
 
     def forward(self, features, labels=None, mask=None):
@@ -116,6 +117,7 @@ class SupConLoss(nn.Module):
         )
         mask = mask * logits_mask
 
+        ########################### Contrastive loss of paper ###########################
         # # compute log_prob
         # exp_logits_d = torch.exp(logits) * logits_mask
         # exp_logits_n = torch.exp(logits) * mask
@@ -124,8 +126,22 @@ class SupConLoss(nn.Module):
         # # compute mean of log-likelihood over positive
         # mean_log_prob_pos = log_prob.sum(1) / mask.sum(1)
 
+        ########################### Contrastive loss of ConceptExpress ###########################
         # compute log_prob
-        exp_logits = torch.exp(logits) * logits_mask
+        if self.mode == 'con':
+            exp_logits = torch.exp(logits) * logits_mask
+        elif self.mode == 'con_kl':
+            # kl divergence
+            # 将 v 转换为概率分布，使用 softmax 函数
+            prob_dist = F.softmax(anchor_feature, dim=1).to(device)  # torch.Size([10, 1024]), 每行的和为1，因为是概率分布
+            kl_logits = torch.zeros((prob_dist.size(0), prob_dist.size(0)), device=prob_dist.device)
+            for i in range(prob_dist.size(0)):
+                for j in range(prob_dist.size(0)):
+                    p = prob_dist[i]
+                    q = prob_dist[j]
+                    kl_logits[i, j] = torch.div((F.kl_div(torch.log(p), q, reduction='batchmean') + F.kl_div(torch.log(q), p, reduction='batchmean')), 2)
+            exp_logits = (torch.exp(logits) + kl_logits) * logits_mask
+
         log_prob = logits - torch.log(exp_logits.sum(1, keepdim=True))
 
         # compute mean of log-likelihood over positive
@@ -140,8 +156,9 @@ class SupConLoss(nn.Module):
     
 
 class SupKLDiergence(nn.Module):
-    def __init__(self, contrast_mode='one'):
+    def __init__(self, contrast_mode='one', div_mode='log'):
         self.contrast_mode = contrast_mode
+        self.div_mode = div_mode
         super(SupKLDiergence, self).__init__()
 
     def forward(self, features, labels=None, mask=None):
@@ -210,9 +227,6 @@ class SupKLDiergence(nn.Module):
                     kl_div = torch.div((F.kl_div(torch.log(p), q, reduction='batchmean') + F.kl_div(torch.log(q), p, reduction='batchmean')), 2)
                     same_label_kl_sum = torch.add(same_label_kl_sum, kl_div)
 
-        # # 转换为常量
-        # same_label_kl_sum = same_label_kl_sum.item()
-
         # 初始化不同标签的KL散度之和
         diff_label_kl_sum = torch.tensor(0).to(device)
 
@@ -224,11 +238,14 @@ class SupKLDiergence(nn.Module):
                     q = prob_dist[j]
                     kl_div = torch.div((F.kl_div(torch.log(p), q, reduction='batchmean') + F.kl_div(torch.log(q), p, reduction='batchmean')), 2)
                     diff_label_kl_sum = torch.add(diff_label_kl_sum, kl_div)
-        # 转换为常量
-        # diff_label_kl_sum = diff_label_kl_sum.item()
 
+        ########################### Division ###########################
         loss = torch.div(same_label_kl_sum, diff_label_kl_sum)
-        # print("@"*30)
-        # print(loss)
-        # print("@"*30)
+
+        ########################### log division ###########################
+        if self.div_mode =='log':
+            loss = torch.log(loss)
+        print("@"*30)
+        print(loss)
+        print("@"*30)
         return loss
