@@ -139,11 +139,15 @@ class SupConLoss(nn.Module):
                 for j in range(prob_dist.size(0)):
                     p = prob_dist[i]
                     q = prob_dist[j]
-                    kl_logits[i, j] = torch.div((F.kl_div(torch.log(p), q, reduction='batchmean') + F.kl_div(torch.log(q), p, reduction='batchmean')), 2)
-            exp_logits = (torch.exp(logits) + kl_logits) * logits_mask
+                    kl_logits[i, j] = torch.div((F.kl_div(torch.log(p), q, reduction='mean') + F.kl_div(torch.log(q), p, reduction='mean')), 2)
+            exp_logits = (torch.exp(logits) + 1000 * kl_logits) * logits_mask
 
         log_prob = logits - torch.log(exp_logits.sum(1, keepdim=True))
-
+        # print("="*30)
+        # print(torch.exp(logits))
+        # print("@"*30)
+        # print(1000*kl_logits)
+        # print("@"*30)
         # compute mean of log-likelihood over positive
         mean_log_prob_pos = (mask * log_prob).sum(1) / mask.sum(1)
 

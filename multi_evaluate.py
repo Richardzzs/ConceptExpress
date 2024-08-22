@@ -4,9 +4,9 @@ from transformers import AutoProcessor, CLIPModel
 import os
 
 # 原图路径
-path_ori = "/root/ConceptExpress/ckpts/69/69_con_ori_abs/attention/0-step/final_masked1.png"
+path_ori = "/root/ConceptExpress/ckpts/65/65_con_kl_1000/attention/0-step/final_masked3.png"
 # 图片文件夹路径
-folder_path = "/root/ConceptExpress/output_69/seed_0/69_con_ori_abs_snow/a-photo-of-<asset1>-in-the-snow"
+folder_path = "/root/ConceptExpress/output_65/65_con_kl_1000_asset_3/a-photo-of-<asset3>"
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 processor = AutoProcessor.from_pretrained("openai/clip-vit-base-patch32")
