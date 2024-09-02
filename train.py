@@ -1764,7 +1764,9 @@ class ConceptExpress:
         c, num_clust, req_c, min_sim_init = FINCH(x_np, initial_rank=None, 
                                     req_clust=None, distance='kld', 
                                     ensure_early_exit=False, verbose=True)
-        
+        print(x_np)
+        x_np_save_path = os.path.join(self.args.output_dir, "x_np.npy")
+        np.save(x_np_save_path, x_np)
         for i, num in enumerate(num_clust):
             if num >= 10 and num_clust[i+1] < 10:
                 index = i

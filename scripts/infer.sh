@@ -11,6 +11,12 @@ python infer.py \
   --seed 0
 
 python infer.py \
+  --embed_path ckpts/69/69_con/learned_embeds_final.bin \
+  --prompt "a photo of <asset0> and <asset1>" \
+  --save_path output_69/seed_0/69_con_01 \
+  --seed 0
+
+python infer.py \
   --embed_path ckpts/69/69_con_kl_1000/learned_embeds_final.bin \
   --prompt "a photo of <asset0> on the beach" \
   --save_path output_69/seed_0/69_con_kl_1000_beach \
@@ -32,4 +38,10 @@ python infer.py \
   --embed_path ckpts/65/65_con_kl_1000/learned_embeds_final.bin \
   --prompt "a photo of <asset0>" \
   --save_path output_65/65_con_kl_1000_asset_0 \
+  --seed 0
+
+python infer.py \
+  --embed_path ckpts/03/03_con_ori_abs/learned_embeds_final.bin \
+  --prompt "a photo of <asset0> and <asset1>" \
+  --save_path output_03/03_con_ori_abs_01 \
   --seed 0
