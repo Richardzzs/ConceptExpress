@@ -473,6 +473,12 @@ def parse_args(input_args=None):
         help="The weight of contrastive loss.",
     )
     parser.add_argument(
+        "--combine_step",
+        type=int,
+        default=50,
+        help="The step we start to calculate the average loss"
+    )
+    parser.add_argument(
         "--merge_step",
         type=int,
         default=100,
@@ -767,6 +773,7 @@ class ConceptExpress:
         self.main()
 
     def main(self):
+        print("="*100)
         logging_dir = Path(self.args.output_dir, self.args.logging_dir)
 
         self.accelerator = Accelerator(
@@ -1131,7 +1138,7 @@ class ConceptExpress:
         
         self.token_manager = TokenManager(self.placeholder_tokens, self.tokenizer, self.args.num_split_tokens)
         
-        self.contrastive_loss = SupConLoss(mode="con_kl", temperature=self.args.temperature, 
+        self.contrastive_loss = SupConLoss(temperature=self.args.temperature, 
                                            base_temperature=self.args.temperature)
         
         self.kl_divergence_diff = SupKLDiergence()
@@ -1141,6 +1148,8 @@ class ConceptExpress:
             if self.args.train_text_encoder:
                 self.text_encoder.train()
             for step, batch in enumerate(train_dataloader):
+                print(type(batch))
+                # print(batch.keys())
                 if self.args.phase1_train_steps == global_step:
                     self.unet.requires_grad_(True)
                     if self.args.train_text_encoder:
@@ -1299,6 +1308,7 @@ class ConceptExpress:
                     continue
 
                 with self.accelerator.accumulate(self.unet):
+                    # print(prompt_ids_list)
                     for list_idx in range(len(prompt_ids_list)):
                         prompt_ids, tokens_to_use, masks_to_use, feats_to_use, token_ids = \
                             prompt_ids_list[list_idx], tokens_to_use_list[list_idx],\
@@ -1433,8 +1443,6 @@ class ConceptExpress:
                         
                         logs["attn_loss"] = attn_loss.detach().item()
                         loss += attn_loss
-
-                        loss_con_list = torch.tensor(0)
                         
                         if self.token_manager.split_state:
                             converted_ids = self.tokenizer.encode([i[0] for i in tokens_to_use_list], 
@@ -1480,8 +1488,8 @@ class ConceptExpress:
                             # print(label)
                             # print("="*30)
                             
-                            # sample_embeddings_normalized = F.normalize(sample_embeddings.unsqueeze(1), p=2, dim=-1)
-                            sample_embeddings_normalized = torch.abs(F.normalize(sample_embeddings.unsqueeze(1), p=2, dim=-1))
+                            sample_embeddings_normalized = F.normalize(sample_embeddings.unsqueeze(1), p=2, dim=-1)
+                            # sample_embeddings_normalized = torch.abs(F.normalize(sample_embeddings.unsqueeze(1), p=2, dim=-1))
                             # torch.Size([10, 1, 1024])
                             # print("="*30)
                             # print("sample_embeddings_normalized")
@@ -1512,6 +1520,10 @@ class ConceptExpress:
                             # loss_kl = self.kl_divergence_diff(sample_embeddings_normalized, labels=label)
 
                             # loss += loss_kl * self.args.weight_contrast                      
+
+                            ### Combined average Loss
+                            # if global_step >= self.args.combine_step:
+                                
 
                         self.accelerator.backward(loss)
 
@@ -1764,7 +1776,6 @@ class ConceptExpress:
         c, num_clust, req_c, min_sim_init = FINCH(x_np, initial_rank=None, 
                                     req_clust=None, distance='kld', 
                                     ensure_early_exit=False, verbose=True)
-        print(x_np)
         x_np_save_path = os.path.join(self.args.output_dir, "x_np.npy")
         np.save(x_np_save_path, x_np)
         for i, num in enumerate(num_clust):

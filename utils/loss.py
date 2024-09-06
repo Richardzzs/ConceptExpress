@@ -155,7 +155,7 @@ class SupConLoss(nn.Module):
         # loss
         loss = - (self.temperature / self.base_temperature) * mean_log_prob_pos
         loss = loss.view(anchor_count, batch_size).mean()  # normalize
-        print(loss)
+        # print(loss)
         return loss
     
 
