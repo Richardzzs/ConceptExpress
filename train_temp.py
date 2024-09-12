@@ -473,12 +473,6 @@ def parse_args(input_args=None):
         help="The weight of contrastive loss.",
     )
     parser.add_argument(
-        "--combine_step",
-        type=int,
-        default=50,
-        help="The step we start to calculate the average loss"
-    )
-    parser.add_argument(
         "--merge_step",
         type=int,
         default=100,
@@ -550,7 +544,8 @@ class TokenManager():
         
         if self.mask_list is None:
             self.mask_list, self.feat_list = mask_list_new, feat_list_new
-            self.ph_tokens_used = self.all_ph_tokens[:len(self.mask_list)]
+            # self.ph_tokens_used = self.all_ph_tokens[:len(self.mask_list)]
+            self.ph_tokens_used = self.all_ph_tokens[:len(self.mask_list)] + [self.all_ph_tokens[-1]]
         else:
             self.old_to_new(mask_list_new, feat_list_new)
             
@@ -586,7 +581,8 @@ class TokenManager():
             self.mask_list = self.mask_list + mask_list_new[col_ind_not]
             self.feat_list = self.feat_list + feat_list_new[col_ind_not]
             
-            self.ph_tokens_used = self.all_ph_tokens[:num_new]
+            # self.ph_tokens_used = self.all_ph_tokens[:num_new]
+            self.ph_tokens_used = self.all_ph_tokens[:num_new] + self.all_ph_tokens[-1]
     
     def flip_mask(self, input_list):
         shape = input_list[0].shape
@@ -862,6 +858,9 @@ class ConceptExpress:
             self.args.placeholder_token.replace(">", f"{idx}>")
             for idx in range(self.args.num_of_assets)
         ]
+        self.placeholder_tokens.append(self.args.placeholder_token.replace(">", f"*>"))
+        self.args.num_of_assets += 1
+        
         num_added_tokens = self.tokenizer.add_tokens(self.placeholder_tokens)
         assert num_added_tokens == self.args.num_of_assets
         self.placeholder_token_ids = self.tokenizer.convert_tokens_to_ids(
@@ -1137,7 +1136,7 @@ class ConceptExpress:
         
         self.token_manager = TokenManager(self.placeholder_tokens, self.tokenizer, self.args.num_split_tokens)
         
-        self.contrastive_loss = SupConLoss(temperature=self.args.temperature, 
+        self.contrastive_loss = SupConLoss(mode="con_kl", temperature=self.args.temperature, 
                                            base_temperature=self.args.temperature)
         
         self.kl_divergence_diff = SupKLDiergence()
@@ -1147,16 +1146,6 @@ class ConceptExpress:
             if self.args.train_text_encoder:
                 self.text_encoder.train()
             for step, batch in enumerate(train_dataloader):
-                """
-                    batch: <class 'dict'>
-                        dict_keys(['pixel_values', 'flip'])
-                    batch['pixel_values'].shape = torch.Size([2, 3, 512, 512])
-                    batch['pixel_values'][0][0].shape = torch.Size([512, 512])
-
-                """
-                print(type(batch))
-                print(batch['pixel_values'].shape)
-                print(batch)
                 if self.args.phase1_train_steps == global_step:
                     self.unet.requires_grad_(True)
                     if self.args.train_text_encoder:
@@ -1315,11 +1304,11 @@ class ConceptExpress:
                     continue
 
                 with self.accelerator.accumulate(self.unet):
-                    # print(prompt_ids_list)
-                    for list_idx in range(len(prompt_ids_list)):
+                    for list_idx in range(len(prompt_ids_list)-1):
                         prompt_ids, tokens_to_use, masks_to_use, feats_to_use, token_ids = \
                             prompt_ids_list[list_idx], tokens_to_use_list[list_idx],\
                                 masks_to_use_list[list_idx], feats_to_use_list[list_idx], token_ids_list[list_idx]
+                        
                         # Convert images to latent space
                         latents = self.vae.encode(
                             batch["pixel_values"].to(dtype=self.weight_dtype)
@@ -1450,6 +1439,8 @@ class ConceptExpress:
                         
                         logs["attn_loss"] = attn_loss.detach().item()
                         loss += attn_loss
+
+                        loss_con_list = torch.tensor(0)
                         
                         if self.token_manager.split_state:
                             converted_ids = self.tokenizer.encode([i[0] for i in tokens_to_use_list], 
@@ -1495,8 +1486,8 @@ class ConceptExpress:
                             # print(label)
                             # print("="*30)
                             
-                            sample_embeddings_normalized = F.normalize(sample_embeddings.unsqueeze(1), p=2, dim=-1)
-                            # sample_embeddings_normalized = torch.abs(F.normalize(sample_embeddings.unsqueeze(1), p=2, dim=-1))
+                            # sample_embeddings_normalized = F.normalize(sample_embeddings.unsqueeze(1), p=2, dim=-1)
+                            sample_embeddings_normalized = torch.abs(F.normalize(sample_embeddings.unsqueeze(1), p=2, dim=-1))
                             # torch.Size([10, 1, 1024])
                             # print("="*30)
                             # print("sample_embeddings_normalized")
@@ -1528,10 +1519,6 @@ class ConceptExpress:
 
                             # loss += loss_kl * self.args.weight_contrast                      
 
-                            ### Combined average Loss
-                            # if global_step >= self.args.combine_step:
-                                
-
                         self.accelerator.backward(loss)
 
                         # No need to keep the attention store
@@ -1562,6 +1549,124 @@ class ConceptExpress:
                                 ] = orig_embeds_params[
                                     : -self.args.num_of_assets
                                 ]
+                    
+                    if (global_step % 10) % 2 == 1:
+                        
+                        prompt_ids_star, tokens_to_use_star, masks_to_use_star, feats_to_use_star, token_ids_star = prompt_ids_list[-1], tokens_to_use_list[-1], masks_to_use_list[-1], feats_to_use_list[-1], token_ids_list[-1]
+                        
+                        for list_idx in range(len(prompt_ids_list)-1):
+                            prompt_ids, tokens_to_use, masks_to_use, feats_to_use, token_ids = \
+                            prompt_ids_list[list_idx], tokens_to_use_list[list_idx],\
+                                masks_to_use_list[list_idx], feats_to_use_list[list_idx], token_ids_list[list_idx]
+                        
+                            # Convert images to latent space
+                            latents = self.vae.encode(
+                                batch["pixel_values"].to(dtype=self.weight_dtype)
+                            ).latent_dist.sample()
+                            latents = latents * 0.18215
+
+                            # Sample noise that we'll add to the latents
+                            noise = torch.randn_like(latents)
+                            bsz = latents.shape[0]
+                            # Sample a random timestep for each image
+                            timesteps = torch.randint(
+                                0,
+                                self.noise_scheduler.config.num_train_timesteps,
+                                (bsz,),
+                                device=latents.device,
+                            )
+                            timesteps = timesteps.long()
+
+                            # Add noise to the latents according to the noise magnitude at each timestep
+                            # (this is the forward diffusion process)
+                            noisy_latents = self.noise_scheduler.add_noise(
+                                latents, noise, timesteps
+                            )
+
+                            # Get the text embedding for conditioning
+                            prompt_ids = prompt_ids.to(latents.device)
+                            encoder_hidden_states = self.text_encoder(prompt_ids)[0]
+                            # Predict the noise residual
+                            model_pred = self.unet(
+                                noisy_latents, timesteps, encoder_hidden_states
+                            ).sample
+                        
+                            # Get the text embedding for conditioning
+                            prompt_ids_star = prompt_ids_star.to(latents.device)
+                            encoder_hidden_states_star = self.text_encoder(prompt_ids_star)[0]
+                            # Predict the noise residual
+                            model_pred_star = self.unet(
+                                noisy_latents, timesteps, encoder_hidden_states_star
+                            ).sample
+
+                            # Get the target for loss depending on the prediction type
+                            if self.noise_scheduler.config.prediction_type == "epsilon":
+                                target = noise
+                            elif self.noise_scheduler.config.prediction_type == "v_prediction":
+                                target = self.noise_scheduler.get_velocity(
+                                    latents, noise, timesteps
+                                )
+                            else:
+                                raise ValueError(
+                                    f"Unknown prediction type {self.noise_scheduler.config.prediction_type}"
+                                )
+                            
+                            _, model_pred = torch.chunk(model_pred, 2, dim=0)
+                            # _, target = torch.chunk(target, 2, dim=0)
+                            _, model_pred_star = torch.chunk(model_pred_star, 2, dim=0)
+                            
+                            if self.args.apply_masked_loss:
+                                max_mask = torch.max(
+                                    masks_to_use, dim=0, keepdim=True
+                                ).values.unsqueeze(1)
+                            
+                                max_mask_np = T.ToPILImage()(max_mask.reshape(64,64))
+                                pil = (batch["pixel_values"][0] * 0.5 + 0.5) 
+                                pil = T.ToPILImage()(pil)
+                                image_masked_save = self.vis_masked_image(pil, max_mask_np)
+
+                                model_pred = model_pred * max_mask
+                                # target = target * max_mask
+                                model_pred_star = model_pred_star * max_mask
+                            
+                            # loss = F.mse_loss(
+                            #     model_pred.float(), target.float(), reduction="mean"
+                            # )
+                        
+                            loss = F.mse_loss(
+                                model_pred.float(), model_pred_star.float(), reduction="mean"
+                            )
+                            
+                            self.accelerator.backward(loss)
+
+                            # No need to keep the attention store
+                            self.controller.attention_store = {}
+                            self.controller.cur_step = 0
+
+                            if self.accelerator.sync_gradients:
+                                params_to_clip = (
+                                    itertools.chain(
+                                        self.unet.parameters(), self.text_encoder.parameters()
+                                    )
+                                    if self.args.train_text_encoder
+                                    else self.unet.parameters()
+                                )
+                                self.accelerator.clip_grad_norm_(
+                                    params_to_clip, self.args.max_grad_norm
+                                )
+                            optimizer.step()
+                            lr_scheduler.step()
+                            optimizer.zero_grad(set_to_none=self.args.set_grads_to_none)
+                        
+                            if global_step < self.args.phase1_train_steps:
+                                with torch.no_grad():
+                                    self.accelerator.unwrap_model(
+                                        self.text_encoder
+                                    ).get_input_embeddings().weight[
+                                        : -self.args.num_of_assets
+                                    ] = orig_embeds_params[
+                                        : -self.args.num_of_assets
+                                    ]
 
                 # Checks if the accelerator has performed an optimization step behind the scenes
                 if self.accelerator.sync_gradients:
@@ -1783,6 +1888,7 @@ class ConceptExpress:
         c, num_clust, req_c, min_sim_init = FINCH(x_np, initial_rank=None, 
                                     req_clust=None, distance='kld', 
                                     ensure_early_exit=False, verbose=True)
+        # print(x_np)
         x_np_save_path = os.path.join(self.args.output_dir, "x_np.npy")
         np.save(x_np_save_path, x_np)
         for i, num in enumerate(num_clust):
