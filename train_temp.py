@@ -19,6 +19,7 @@ import torch.nn.functional as F
 import torchvision.transforms.functional as TF
 import torch.utils.checkpoint
 from torch.utils.data import Dataset
+from torch.cuda import empty_cache
 import numpy as np
 
 import datasets
@@ -1364,10 +1365,10 @@ class ConceptExpress:
                                     masks_to_use, dim=0, keepdim=True
                                 ).values.unsqueeze(1)
                                 
-                                max_mask_np = T.ToPILImage()(max_mask.reshape(64,64))
-                                pil = (batch["pixel_values"][0] * 0.5 + 0.5) 
-                                pil = T.ToPILImage()(pil)
-                                image_masked_save = self.vis_masked_image(pil, max_mask_np)
+                                # max_mask_np = T.ToPILImage()(max_mask.reshape(64,64))
+                                # pil = (batch["pixel_values"][0] * 0.5 + 0.5) 
+                                # pil = T.ToPILImage()(pil)
+                                # image_masked_save = self.vis_masked_image(pil, max_mask_np)
 
                                 model_pred = model_pred * max_mask
                                 target = target * max_mask
@@ -1489,8 +1490,8 @@ class ConceptExpress:
                                 # print(label)
                                 # print("="*30)
                                 
-                                # sample_embeddings_normalized = F.normalize(sample_embeddings.unsqueeze(1), p=2, dim=-1)
-                                sample_embeddings_normalized = torch.abs(F.normalize(sample_embeddings.unsqueeze(1), p=2, dim=-1))
+                                sample_embeddings_normalized = F.normalize(sample_embeddings.unsqueeze(1), p=2, dim=-1)
+                                # sample_embeddings_normalized = torch.abs(F.normalize(sample_embeddings.unsqueeze(1), p=2, dim=-1))
                                 # torch.Size([10, 1, 1024])
                                 # print("="*30)
                                 # print("sample_embeddings_normalized")
@@ -1561,7 +1562,11 @@ class ConceptExpress:
                             prompt_ids, tokens_to_use, masks_to_use, feats_to_use, token_ids = \
                             prompt_ids_list[list_idx], tokens_to_use_list[list_idx],\
                                 masks_to_use_list[list_idx], feats_to_use_list[list_idx], token_ids_list[list_idx]
-                        
+                            
+                            # self.unet.requires_grad_(False)
+                            # self.vae.requires_grad_(False)
+                            # self.text_encoder.requires_grad_(False)
+                            
                             # Convert images to latent space
                             latents = self.vae.encode(
                                 batch["pixel_values"].to(dtype=self.weight_dtype)
@@ -1585,15 +1590,30 @@ class ConceptExpress:
                             noisy_latents = self.noise_scheduler.add_noise(
                                 latents, noise, timesteps
                             )
+                            
+                            self.controller.set_update_attention(False)
+                            # if not self.controller.update_attention:
+                            #     print("update_attention is set to False")
+                            # Since we only train v*, we don't do back propagation for v_i's
+                            with torch.no_grad():
+                                # Get the text embedding for conditioning
+                                prompt_ids = prompt_ids.to(latents.device)
+                                encoder_hidden_states = self.text_encoder(prompt_ids)[0]
+                                # Predict the noise residual
+                                model_pred = self.unet(
+                                    noisy_latents, timesteps, encoder_hidden_states
+                                ).sample
+                                model_pred_detached = model_pred.detach()
+                                del model_pred, encoder_hidden_states
+                                empty_cache()
+                                
+                            self.controller.set_update_attention(True)
+                            # if self.controller.update_attention:
+                            #     print("update_attention is set to True")
+                            # self.unet.requires_grad_(True)
+                            # self.vae.requires_grad_(True)
+                            # self.text_encoder.requires_grad_(True)
 
-                            # Get the text embedding for conditioning
-                            prompt_ids = prompt_ids.to(latents.device)
-                            encoder_hidden_states = self.text_encoder(prompt_ids)[0]
-                            # Predict the noise residual
-                            model_pred = self.unet(
-                                noisy_latents, timesteps, encoder_hidden_states
-                            ).sample
-                        
                             # Get the text embedding for conditioning
                             prompt_ids_star = prompt_ids_star.to(latents.device)
                             encoder_hidden_states_star = self.text_encoder(prompt_ids_star)[0]
@@ -1601,20 +1621,10 @@ class ConceptExpress:
                             model_pred_star = self.unet(
                                 noisy_latents, timesteps, encoder_hidden_states_star
                             ).sample
-
-                            # Get the target for loss depending on the prediction type
-                            if self.noise_scheduler.config.prediction_type == "epsilon":
-                                target = noise
-                            elif self.noise_scheduler.config.prediction_type == "v_prediction":
-                                target = self.noise_scheduler.get_velocity(
-                                    latents, noise, timesteps
-                                )
-                            else:
-                                raise ValueError(
-                                    f"Unknown prediction type {self.noise_scheduler.config.prediction_type}"
-                                )
+                            del noisy_latents, encoder_hidden_states_star
+                            empty_cache()
                             
-                            _, model_pred = torch.chunk(model_pred, 2, dim=0)
+                            _, model_pred_detached = torch.chunk(model_pred_detached, 2, dim=0)
                             # _, target = torch.chunk(target, 2, dim=0)
                             _, model_pred_star = torch.chunk(model_pred_star, 2, dim=0)
                             
@@ -1623,12 +1633,12 @@ class ConceptExpress:
                                     masks_to_use, dim=0, keepdim=True
                                 ).values.unsqueeze(1)
                             
-                                max_mask_np = T.ToPILImage()(max_mask.reshape(64,64))
-                                pil = (batch["pixel_values"][0] * 0.5 + 0.5) 
-                                pil = T.ToPILImage()(pil)
-                                image_masked_save = self.vis_masked_image(pil, max_mask_np)
+                                # max_mask_np = T.ToPILImage()(max_mask.reshape(64,64))
+                                # pil = (batch["pixel_values"][0] * 0.5 + 0.5) 
+                                # pil = T.ToPILImage()(pil)
+                                # image_masked_save = self.vis_masked_image(pil, max_mask_np)
 
-                                model_pred = model_pred * max_mask
+                                model_pred_detached = model_pred_detached * max_mask
                                 # target = target * max_mask
                                 model_pred_star = model_pred_star * max_mask
                             
@@ -1637,7 +1647,7 @@ class ConceptExpress:
                             # )
                         
                             loss = F.mse_loss(
-                                model_pred.float(), model_pred_star.float(), reduction="mean"
+                                model_pred_detached.float(), model_pred_star.float(), reduction="mean"
                             )
                             
                             self.accelerator.backward(loss)
@@ -2092,11 +2102,12 @@ class P2PCrossAttnProcessor:
         query = attn.head_to_batch_dim(query)
         key = attn.head_to_batch_dim(key)
         value = attn.head_to_batch_dim(value)
-
+        
         attention_probs = attn.get_attention_scores(query, key, attention_mask)
 
         # one line change
-        self.controller(attention_probs, is_cross, self.place_in_unet)
+        if self.controller.update_attention:
+            self.controller(attention_probs, is_cross, self.place_in_unet)
 
         hidden_states = torch.bmm(attention_probs, value)
         hidden_states = attn.batch_to_head_dim(hidden_states)
