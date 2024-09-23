@@ -5,6 +5,18 @@ python infer.py \
   --seed 0
 
 python infer.py \
+  --embed_path ckpts/69/fusion/learned_embeds_final.bin \
+  --prompt "a photo of <asset*>" \
+  --save_path output_69/seed_0/69_fusion \
+  --seed 0
+
+python infer.py \
+  --embed_path ckpts/83/fusion_new4/learned_embeds_final.bin \
+  --prompt "a photo of <asset*a>" \
+  --save_path output_83/83_fusion_new4* \
+  --seed 0
+
+python infer.py \
   --embed_path ckpts/69/69_con_ori_abs/learned_embeds_final.bin \
   --prompt "a photo of <asset0> on the beach" \
   --save_path output_69/seed_0/69_con_ori_abs_beach \
