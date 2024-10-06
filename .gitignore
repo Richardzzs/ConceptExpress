@@ -3,8 +3,11 @@ __pycache__
 uce_images/
 # ckpts/
 # output/
+temp/
 output_03/
+output_48/
 output_65/
 output_69/
+output_83/
 scripts/train_ft.sh
 scripts/infer_ft.sh

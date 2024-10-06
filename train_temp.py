@@ -661,13 +661,14 @@ class TokenManager():
             # self.split_state = True
             
             # 暫時還是不用mask
-            self.mask_list = self.mask_list * self.num_split_tokens + [torch.full_like(self.mask_list[0], 0)] * self.num_split_tokens
-            self.feat_list = self.feat_list * self.num_split_tokens + [torch.full_like(self.feat_list[0], 0)] * self.num_split_tokens
+            self.mask_list = self.mask_list * self.num_split_tokens + [torch.full_like(self.mask_list[0], 1)] * self.num_split_tokens
+            self.feat_list = self.feat_list * self.num_split_tokens + [torch.full_like(self.feat_list[0], 1)] * self.num_split_tokens
             self.split_state = True
             
     def merge_tokens(self):
         if self.split_state:
             self.ph_tokens_used = self.all_ph_tokens[:self.num_tokens] + [self.all_ph_tokens[-self.num_split_tokens]]
+            # print("all_ph_tokens: ", self.all_ph_tokens)
             # print("ph_tokens_used(merge_tokens(): ", self.ph_tokens_used)
             # print(len(self.feat_list))
             self.mask_list = self.mask_list[:self.num_tokens] + [self.mask_list[-self.num_split_tokens]]
@@ -703,28 +704,31 @@ class TokenManager():
             token_ids_list.append(token_ids)
         
         if not self.split_state:
+
+            # As for multiple tokens (cross attention via prompts)
+            # for j in range(self.num_tokens, len(self.ph_tokens_used)):
+            #     for i in range(self.num_tokens):
+            #         prompt_ids, tokens_to_use, masks_to_use, feats_to_use, token_ids = self.return_single_token([i, j], flip, bsz)
+            #         prompt_ids_list.append(prompt_ids)
+            #         tokens_to_use_list.append(tokens_to_use)
+            #         masks_to_use_list.append(torch.full_like(masks_to_use_list[0], 1))
+            #         feats_to_use_list.append(torch.full_like(feats_to_use_list[0], 1))
+            #         token_ids_list.append(token_ids)
+
             prompt_ids, tokens_to_use, masks_to_use, feats_to_use, token_ids = self.return_single_token(list(range(len(self.ph_tokens_used))), flip, bsz)
             # print("=*"*10)
             # print(prompt_ids)
             prompt_ids_list.append(prompt_ids)
             tokens_to_use_list.append(tokens_to_use)
-            masks_to_use_list.append(masks_to_use)
-            feats_to_use_list.append(feats_to_use)
+            masks_to_use_list.append(torch.full_like(masks_to_use_list[0], 1))
+            feats_to_use_list.append(torch.full_like(feats_to_use_list[0], 1))
             token_ids_list.append(token_ids)
 
-            # As for multiple tokens (cross attention via prompts)
-            n1 = len(self.ph_tokens_used)
-            for j in range(n1 - self.num_tokens, n1):
-                for i in range(n1 - self.num_tokens):
-                    prompt_ids, tokens_to_use, masks_to_use, feats_to_use, token_ids = self.return_single_token([i, j], flip, bsz)
-                    prompt_ids_list.append(prompt_ids)
-                    tokens_to_use_list.append(tokens_to_use)
-                    masks_to_use_list.append(masks_to_use)
-                    feats_to_use_list.append(feats_to_use)
-                    token_ids_list.append(token_ids)
             # print("=*"*10)
-            print(prompt_ids_list)
-            print(tokens_to_use_list)
+            # print(prompt_ids_list)
+
+            # [['<asset0>'], ['<asset1>'], ['<asset*a>'], ['<asset0>', '<asset*a>'], ['<asset1>', '<asset*a>'], ['<asset0>', '<asset1>', '<asset*a>']]
+            # print("tokens_to_use_list", tokens_to_use_list)
         return prompt_ids_list, tokens_to_use_list, masks_to_use_list, feats_to_use_list, token_ids_list
         
 class DreamBoothDataset(Dataset):
@@ -1396,13 +1400,12 @@ class ConceptExpress:
                 
                 with self.accelerator.accumulate(self.unet):
                     
-                    # print("="*20)
-                    # print(len(prompt_ids_list)) # 15
                     for list_idx in range(len(prompt_ids_list)):
                         prompt_ids, tokens_to_use, masks_to_use, feats_to_use, token_ids = \
                             prompt_ids_list[list_idx], tokens_to_use_list[list_idx],\
                                 masks_to_use_list[list_idx], feats_to_use_list[list_idx], token_ids_list[list_idx]
-                        
+                        # len(prompt_ids_list) = 15
+                        # print(len(prompt_ids_list))
                         # Convert images to latent space
                         latents = self.vae.encode(
                             batch["pixel_values"].to(dtype=self.weight_dtype)
@@ -1460,8 +1463,15 @@ class ConceptExpress:
                             pil = T.ToPILImage()(pil)
                             image_masked_save = self.vis_masked_image(pil, max_mask_np)
 
-                            model_pred = model_pred * max_mask
-                            target = target * max_mask
+                            # 对于v*，不用mask
+                            if self.token_manager.split_state:
+                                if list_idx < self.token_manager.num_tokens * self.args.num_split_tokens:
+                                    model_pred = model_pred * max_mask
+                                    target = target * max_mask
+                            else:
+                                if list_idx < num_tokens:
+                                    model_pred = model_pred * max_mask
+                                    target = target * max_mask
                             
                         loss = F.mse_loss(
                             model_pred.float(), target.float(), reduction="mean"
@@ -1694,32 +1704,33 @@ class ConceptExpress:
                                     : -self.args.num_of_assets
                                 ]
                     
-                    if (global_step % 10) % 2 == 1:
+                    if (global_step % 10) % 2 == 1:# and self.token_manager.split_state:
                         # print("prompt_ids_list", prompt_ids_list)
                         # print("prompt_ids_star", prompt_ids_star)
                         # print("token_ids_star", token_ids_star)
                         # only traverse v_i's
-                        for list_idx in range(len(prompt_ids_list)-self.args.num_split_tokens):
+
+                        if self.token_manager.split_state:
+                            id_start = 1
+                            id_end = self.args.num_split_tokens
+                            id_placeholder = 0
+                        else:
+                            # 因为加上了v1 and v2 and v*的prompt。位于最后一个，所以需要多索引一个
+                            id_start = 2
+                            id_end = 2
+                            id_placeholder = 1
+
+                        for list_idx in range(len(prompt_ids_list)-id_placeholder-id_end):
                             prompt_ids, tokens_to_use, masks_to_use, feats_to_use, token_ids = \
                             prompt_ids_list[list_idx], tokens_to_use_list[list_idx],\
                                 masks_to_use_list[list_idx], feats_to_use_list[list_idx], token_ids_list[list_idx]
-                            # print("===", self.token_manager.split_state)
-                            if self.token_manager.split_state:
-                                # print("prompt_ids_list11111", len(prompt_ids_list))
-                                prompt_ids_star, tokens_to_use_star, masks_to_use_star, feats_to_use_star, token_ids_star = \
-                                    prompt_ids_list[-random.randint(0, self.args.num_split_tokens)], \
-                                    tokens_to_use_list[-random.randint(0, self.args.num_split_tokens)], \
-                                    masks_to_use_list[-random.randint(0, self.args.num_split_tokens)], \
-                                    feats_to_use_list[-random.randint(0, self.args.num_split_tokens)], \
-                                    token_ids_list[-random.randint(0, self.args.num_split_tokens)]
-                            else:
-                                # print("prompt_ids_list22222", len(prompt_ids_list))
-                                prompt_ids_star, tokens_to_use_star, masks_to_use_star, feats_to_use_star, token_ids_star = \
-                                    prompt_ids_list[-self.args.num_split_tokens], \
-                                    tokens_to_use_list[-self.args.num_split_tokens], \
-                                    masks_to_use_list[-self.args.num_split_tokens], \
-                                    feats_to_use_list[-self.args.num_split_tokens], \
-                                    token_ids_list[-self.args.num_split_tokens]
+
+                            prompt_ids_star, tokens_to_use_star, masks_to_use_star, feats_to_use_star, token_ids_star = \
+                                prompt_ids_list[-random.randint(id_start, id_end)], \
+                                tokens_to_use_list[-random.randint(id_start, id_end)], \
+                                masks_to_use_list[-random.randint(id_start, id_end)], \
+                                feats_to_use_list[-random.randint(id_start, id_end)], \
+                                token_ids_list[-random.randint(id_start, id_end)]
 
                             # self.unet.requires_grad_(False)
                             # self.vae.requires_grad_(False)
