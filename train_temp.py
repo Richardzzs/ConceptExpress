@@ -706,14 +706,14 @@ class TokenManager():
         if not self.split_state:
 
             # As for multiple tokens (cross attention via prompts)
-            # for j in range(self.num_tokens, len(self.ph_tokens_used)):
-            #     for i in range(self.num_tokens):
-            #         prompt_ids, tokens_to_use, masks_to_use, feats_to_use, token_ids = self.return_single_token([i, j], flip, bsz)
-            #         prompt_ids_list.append(prompt_ids)
-            #         tokens_to_use_list.append(tokens_to_use)
-            #         masks_to_use_list.append(torch.full_like(masks_to_use_list[0], 1))
-            #         feats_to_use_list.append(torch.full_like(feats_to_use_list[0], 1))
-            #         token_ids_list.append(token_ids)
+            for j in range(self.num_tokens, len(self.ph_tokens_used)):
+                for i in range(self.num_tokens):
+                    prompt_ids, tokens_to_use, masks_to_use, feats_to_use, token_ids = self.return_single_token([i, j], flip, bsz)
+                    prompt_ids_list.append(prompt_ids)
+                    tokens_to_use_list.append(tokens_to_use)
+                    masks_to_use_list.append(torch.full_like(masks_to_use_list[0], 1))
+                    feats_to_use_list.append(torch.full_like(feats_to_use_list[0], 1))
+                    token_ids_list.append(token_ids)
 
             prompt_ids, tokens_to_use, masks_to_use, feats_to_use, token_ids = self.return_single_token(list(range(len(self.ph_tokens_used))), flip, bsz)
             # print("=*"*10)
@@ -1319,9 +1319,8 @@ class ConceptExpress:
                     
                     num_tokens = self.token_manager.get_token_num()
                     # print("num_tokens: ", num_tokens)
-                    # print("unwrap", self.accelerator.unwrap_model(
-                    #     self.text_encoder
-                    #     ).get_input_embeddings().weight.data)
+
+                    # torch.Size([49463, 1024])
                     # print("unwrap", self.accelerator.unwrap_model(
                     #     self.text_encoder
                     #     ).get_input_embeddings().weight.data.shape)
@@ -1329,7 +1328,7 @@ class ConceptExpress:
                     # get all embeddings
                     embed_add = self.accelerator.unwrap_model(
                         self.text_encoder
-                        ).get_input_embeddings().weight.data[-self.args.num_of_assets-self.args.num_split_tokens:].detach()
+                        ).get_input_embeddings().weight.data[-self.args.num_of_assets:].detach()
                     # print("embed_add: ", embed_add.shape)
                     # print("embed_add: ", embed_add)
                     # print("num_tokens: ", num_tokens)
@@ -1338,6 +1337,7 @@ class ConceptExpress:
                         new_embed = 0.
                         for j in range(self.args.num_split_tokens):
                             new_embed += embed_add[i + j * num_tokens]                        
+                            
                         # merge the embeddings for each concept by taking average of the split embeddings
                         self.accelerator.unwrap_model(
                             self.text_encoder
@@ -1346,13 +1346,13 @@ class ConceptExpress:
                         ] = new_embed / self.args.num_split_tokens
                     # as for v*
                     new_embed = 0.
-                    for i in range(self.args.num_of_assets-self.args.num_split_tokens, self.args.num_of_assets):
-                        new_embed += embed_add[i]                        
+                    for i in range(self.args.num_split_tokens):
+                        new_embed += embed_add[-self.args.num_split_tokens+i]                        
                     # merge the embeddings for each concept by taking average of the split embeddings
                     self.accelerator.unwrap_model(
                         self.text_encoder
                     ).get_input_embeddings().weight.data[
-                        -self.args.num_of_assets + num_tokens
+                        -self.args.num_split_tokens
                     ] = new_embed / self.args.num_split_tokens
                     
                     if self.accelerator.is_main_process:
@@ -1463,15 +1463,8 @@ class ConceptExpress:
                             pil = T.ToPILImage()(pil)
                             image_masked_save = self.vis_masked_image(pil, max_mask_np)
 
-                            # 对于v*，不用mask
-                            if self.token_manager.split_state:
-                                if list_idx < self.token_manager.num_tokens * self.args.num_split_tokens:
-                                    model_pred = model_pred * max_mask
-                                    target = target * max_mask
-                            else:
-                                if list_idx < num_tokens:
-                                    model_pred = model_pred * max_mask
-                                    target = target * max_mask
+                            model_pred = model_pred * max_mask
+                            target = target * max_mask
                             
                         loss = F.mse_loss(
                             model_pred.float(), target.float(), reduction="mean"
@@ -1711,16 +1704,19 @@ class ConceptExpress:
                         # only traverse v_i's
 
                         if self.token_manager.split_state:
+                            # len(prompt_ids_list) = 15
                             id_start = 1
                             id_end = self.args.num_split_tokens
-                            id_placeholder = 0
                         else:
                             # 因为加上了v1 and v2 and v*的prompt。位于最后一个，所以需要多索引一个
+                            ### 没有加交叉项，prompt_ids_list的长度为4
+                            # len(prompt_ids_list) = 4
                             id_start = 2
                             id_end = 2
-                            id_placeholder = 1
-
-                        for list_idx in range(len(prompt_ids_list)-id_placeholder-id_end):
+                            ### 加上了交叉项
+                            # id_start = 1+2+1
+                            # id_end = 1+2+1
+                        for list_idx in range(len(prompt_ids_list)-id_end):
                             prompt_ids, tokens_to_use, masks_to_use, feats_to_use, token_ids = \
                             prompt_ids_list[list_idx], tokens_to_use_list[list_idx],\
                                 masks_to_use_list[list_idx], feats_to_use_list[list_idx], token_ids_list[list_idx]
@@ -1811,19 +1807,19 @@ class ConceptExpress:
                             # _, target = torch.chunk(target, 2, dim=0)
                             _, model_pred_star = torch.chunk(model_pred_star, 2, dim=0)
                             
-#                             if self.args.apply_masked_loss:
-#                                 max_mask = torch.max(
-#                                     masks_to_use, dim=0, keepdim=True
-#                                 ).values.unsqueeze(1)
+                            if self.args.apply_masked_loss:
+                                max_mask = torch.max(
+                                    masks_to_use, dim=0, keepdim=True
+                                ).values.unsqueeze(1)
                             
-#                                 max_mask_np = T.ToPILImage()(max_mask.reshape(64,64))
-#                                 pil = (batch["pixel_values"][0] * 0.5 + 0.5) 
-#                                 pil = T.ToPILImage()(pil)
-#                                 image_masked_save = self.vis_masked_image(pil, max_mask_np)
+                                max_mask_np = T.ToPILImage()(max_mask.reshape(64,64))
+                                pil = (batch["pixel_values"][0] * 0.5 + 0.5) 
+                                pil = T.ToPILImage()(pil)
+                                image_masked_save = self.vis_masked_image(pil, max_mask_np)
 
-                                # model_pred_detached = model_pred_detached * max_mask
+                                model_pred_detached = model_pred_detached * max_mask
                                 # target = target * max_mask
-                                # model_pred_star = model_pred_star * max_mask
+                                model_pred_star = model_pred_star * max_mask
                             
                             # loss between v* and noise
                             # loss1 = F.mse_loss(
