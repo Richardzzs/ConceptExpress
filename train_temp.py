@@ -668,14 +668,13 @@ class TokenManager():
     def merge_tokens(self):
         if self.split_state:
             self.ph_tokens_used = self.all_ph_tokens[:self.num_tokens] + [self.all_ph_tokens[-self.num_split_tokens]]
-            # print("all_ph_tokens: ", self.all_ph_tokens)
-            # print("ph_tokens_used(merge_tokens(): ", self.ph_tokens_used)
-            # print(len(self.feat_list))
-            self.mask_list = self.mask_list[:self.num_tokens] + [self.mask_list[-self.num_split_tokens]]
-            # print("mask_list: ", self.mask_list)
-            self.feat_list = self.feat_list[:self.num_tokens] + [self.feat_list[-self.num_split_tokens]]
-            # print("feat_list: ", self.feat_list)
-            # print("feat_list[-1]: ", self.feat_list[-1])
+            print("all_ph_tokens: ", self.ph_tokens_used)
+            # TODO: 对于没有交叉项的
+            # self.mask_list = self.mask_list[:self.num_tokens] + [self.mask_list[-self.num_split_tokens]]
+            # self.feat_list = self.feat_list[:self.num_tokens] + [self.feat_list[-self.num_split_tokens]]
+            # TODO: 对于有交叉项的
+            self.mask_list = self.mask_list[:self.num_tokens] + [self.mask_list[-self.num_split_tokens]] + [torch.full_like(self.mask_list[0], 1)] * self.num_tokens
+            self.feat_list = self.feat_list[:self.num_tokens] + [self.feat_list[-self.num_split_tokens]] + [torch.full_like(self.mask_list[0], 1)] * self.num_tokens
             self.split_state = False
     
     def get_token_num(self):
@@ -705,7 +704,7 @@ class TokenManager():
         
         if not self.split_state:
 
-            # As for multiple tokens (cross attention via prompts)
+            # TODO: As for multiple tokens (cross attention via prompts)
             for j in range(self.num_tokens, len(self.ph_tokens_used)):
                 for i in range(self.num_tokens):
                     prompt_ids, tokens_to_use, masks_to_use, feats_to_use, token_ids = self.return_single_token([i, j], flip, bsz)
@@ -1711,11 +1710,12 @@ class ConceptExpress:
                             # 因为加上了v1 and v2 and v*的prompt。位于最后一个，所以需要多索引一个
                             ### 没有加交叉项，prompt_ids_list的长度为4
                             # len(prompt_ids_list) = 4
-                            id_start = 2
-                            id_end = 2
-                            ### 加上了交叉项
-                            # id_start = 1+2+1
-                            # id_end = 1+2+1
+                            # TODO: 没加交叉项
+                            # id_start = 2
+                            # id_end = 2
+                            #TODO: 加上了交叉项
+                            id_start = 1+2+1
+                            id_end = 1+2+1
                         for list_idx in range(len(prompt_ids_list)-id_end):
                             prompt_ids, tokens_to_use, masks_to_use, feats_to_use, token_ids = \
                             prompt_ids_list[list_idx], tokens_to_use_list[list_idx],\
