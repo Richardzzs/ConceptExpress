@@ -673,8 +673,8 @@ class TokenManager():
             # self.mask_list = self.mask_list[:self.num_tokens] + [self.mask_list[-self.num_split_tokens]]
             # self.feat_list = self.feat_list[:self.num_tokens] + [self.feat_list[-self.num_split_tokens]]
             # TODO: 对于有交叉项的
-            self.mask_list = self.mask_list[:self.num_tokens] + [self.mask_list[-self.num_split_tokens]] + [torch.full_like(self.mask_list[0], 1)] * self.num_tokens
-            self.feat_list = self.feat_list[:self.num_tokens] + [self.feat_list[-self.num_split_tokens]] + [torch.full_like(self.mask_list[0], 1)] * self.num_tokens
+            self.mask_list = self.mask_list[:self.num_tokens] + [self.mask_list[-self.num_split_tokens]] + [torch.full_like(self.mask_list[0], 1)] * (self.num_tokens + 1)
+            self.feat_list = self.feat_list[:self.num_tokens] + [self.feat_list[-self.num_split_tokens]] + [torch.full_like(self.mask_list[0], 1)] * (self.num_tokens + 1)
             self.split_state = False
     
     def get_token_num(self):
@@ -705,6 +705,13 @@ class TokenManager():
         if not self.split_state:
 
             # TODO: As for multiple tokens (cross attention via prompts)
+            prompt_ids, tokens_to_use, masks_to_use, feats_to_use, token_ids = self.return_single_token([0, 1], flip, bsz)
+            prompt_ids_list.append(prompt_ids)
+            tokens_to_use_list.append(tokens_to_use)
+            masks_to_use_list.append(torch.full_like(masks_to_use_list[0], 1))
+            feats_to_use_list.append(torch.full_like(feats_to_use_list[0], 1))
+            token_ids_list.append(token_ids)
+
             for j in range(self.num_tokens, len(self.ph_tokens_used)):
                 for i in range(self.num_tokens):
                     prompt_ids, tokens_to_use, masks_to_use, feats_to_use, token_ids = self.return_single_token([i, j], flip, bsz)
@@ -1398,7 +1405,10 @@ class ConceptExpress:
                     continue
                 
                 with self.accelerator.accumulate(self.unet):
-                    
+                    # for the cross attention regularization of v*
+                    cross_attn_flag = []
+                    asset_attn_mask_v0 = None
+                    asset_attn_mask_v1 = None
                     for list_idx in range(len(prompt_ids_list)):
                         prompt_ids, tokens_to_use, masks_to_use, feats_to_use, token_ids = \
                             prompt_ids_list[list_idx], tokens_to_use_list[list_idx],\
@@ -1551,8 +1561,9 @@ class ConceptExpress:
                                     )
                                     .nonzero()
                                     .item()
-                                )
-                                asset_attn_mask = agg_attn[..., asset_idx]
+                                ) # asset_idx记录prompt_ids中哪个位置对应的是当前的asset
+                                # print(asset_idx)
+                                asset_attn_mask = agg_attn[..., asset_idx]  # 找到对应的attn
                                 feat_target = GT_feats[mask_id, 0].detach()
                                 
                                 attn_loss += wasser_loss(
@@ -1663,7 +1674,40 @@ class ConceptExpress:
                             # KL Divergence difference between same label and different label
                             # loss_kl = self.kl_divergence_diff(sample_embeddings_normalized, labels=label)
 
-                            # loss += loss_kl * self.args.weight_contrast                      
+                            # loss += loss_kl * self.args.weight_contrast             
+
+                        #######################################
+                        ### TODO the cross attention module ###
+                        #######################################
+                        attn_loss_star = 0.
+                        if not self.token_manager.split_state:
+                            # v0 and v1
+                            if list_idx == self.token_manager.get_token_num() + 1:
+                                # V0对应的cross attn
+                                asset_idx_v0 = 4
+                                asset_attn_mask_v0 = agg_attn[..., asset_idx_v0]
+                                asset_attn_mask_v0 = asset_attn_mask_v0.detach().clone()
+                                # V1对应的cross attn
+                                asset_idx_v1 = 6
+                                asset_attn_mask_v1 = agg_attn[..., asset_idx_v1]
+                                asset_attn_mask_v1 = asset_attn_mask_v1.detach().clone()
+                            # v0 and v*
+                            asset_idx_v_star = 6
+                            asset_attn_mask_star = agg_attn[..., asset_idx_v_star]
+                            asset_attn_mask_star = asset_attn_mask_star.clone()
+                            if list_idx == self.token_manager.get_token_num() + 2:
+                                attn_loss_star += wasser_loss(
+                                    asset_attn_mask_star.float(),
+                                    asset_attn_mask_v1.float(),
+                                )
+                            # v1 and v*
+                            elif list_idx == self.token_manager.get_token_num() + 2 + 1:
+                                attn_loss_star += wasser_loss(
+                                    asset_attn_mask_star.float(),
+                                    asset_attn_mask_v0.float(),
+                                )
+                            loss += attn_loss_star
+
 
                         self.accelerator.backward(loss)
 
