@@ -53,6 +53,7 @@ from infer import infer_with_embed
 from utils.loss import SupConLoss, SupKLDiergence
 from utils.pca import pca_visual
 import json
+from segment_anything import sam_model_registry, SamPredictor
 
 check_min_version("0.12.0")
 
@@ -2112,6 +2113,7 @@ class ConceptExpress:
         
         feat_map = out.reshape(64**2, 64**2)
         mask_list, feat_list = self.cluster_attention(feat_map, eot_attn_mask, pil, global_step)
+        mask_list, feat_list = self.mask_feat_calculation(feat_map, eot_attn_mask, pil, global_step)
         
         # assert False, "EXIT!"
         return mask_list, feat_list
@@ -2226,7 +2228,140 @@ class ConceptExpress:
             norm.save(os.path.join(self.args.output_dir,'attention/{}-step/final_mean{}.png'.format(global_step, i)))
         
         return mask_final, feat_final
+    
+
+    def mask_feat_calculation(self, feat_map, eot_attn_mask, pil, global_step):
+    
+        mask_list_clustering, feat_list_clustering = self.cluster_attention(feat_map, eot_attn_mask, pil, global_step)
         
+        transform = T.ToPILImage()
+        tsfm = transforms.Resize([256,256])
+        downsampling = transforms.Resize([64,64])
+        upsampling = transforms.Resize([512,512])
+        # mask = transform(eot_attn_mask)
+        # mask.save(os.path.join(self.args.output_dir, 'attention/{}-step/eot_attention.png'.format(global_step)))
+        
+        
+        eot_attn_mask = F.interpolate(
+            input=eot_attn_mask[None, None], size=(64, 64), mode='bilinear'
+        )
+        eot_attn_mask = eot_attn_mask.reshape(64,64)
+        
+        eot_attn_mask = (eot_attn_mask - eot_attn_mask.min()) / (eot_attn_mask.max() - eot_attn_mask.min())
+        
+        if not os.path.exists(os.path.join(self.args.output_dir, "attention/{}-step".format(global_step))):
+            os.makedirs(os.path.join(self.args.output_dir, "attention/{}-step".format(global_step)), exist_ok=True)
+        
+        # print(pil.dtype)
+        pil = transform(pil)
+        pil.save(os.path.join(self.args.output_dir, 'attention/{}-step/image.png'.format(global_step)))
+        image = np.array(pil.convert("RGB"))
+        
+        sam_checkpoint = "sam_vit_h_4b8939.pth"
+        model_type = "vit_h"
+        device = "cuda"
+        
+        sam = sam_model_registry[model_type](checkpoint=sam_checkpoint)
+        sam.to(device=device)
+        predictor = SamPredictor(sam)
+        
+        masks = []
+        for mask_clustering_tensor in mask_list_clustering:
+            
+            mask_clustering = transform(mask_clustering_tensor)
+            mask_clustering_256 = tsfm(mask_clustering)
+            mask_clustering_256_np = np.array(mask_clustering_256)
+            mask_clustering_256_np = np.expand_dims(mask_clustering_256_np, axis=0)
+            mask_clustering_512 = upsampling(mask_clustering)
+            mask_clustering_512_np = np.array(mask_clustering_512)
+            print(sum(mask_clustering_256_np[0]))
+            
+            indices = np.argwhere(mask_clustering_512_np > 0)
+            indices = indices[:, ::-1]
+            k = 3
+
+            row_rand_array = np.arange(indices.shape[0])
+            np.random.shuffle(row_rand_array)
+            selected_indices = indices[row_rand_array[:k]]
+            
+            # input_points = selected_indices
+            print(selected_indices)
+            print(selected_indices.shape)
+            if len(masks) < 1:
+                input_points = np.array([[150,200],[150,300],[200,300]])
+            else:
+                input_points = np.array([[320,200],[330,300],[340,130]])
+            print(input_points)
+            print(input_points.shape)
+
+            input_labels = np.array([1] * k)
+            print(input_points)
+            
+            with torch.inference_mode():
+                predictor.set_image(image)
+                # masks.append(1.0 - mask[0])
+                mask, _, _ = predictor.predict(
+                point_coords=input_points,
+                point_labels=input_labels,
+                # box=input_box,
+                multimask_output=False,
+                )
+                masks.append(mask[0].astype(int))
+                # masks.append(1.0 - mask[0])
+            
+            def show_mask(mask, ax, random_color=False):
+                if random_color:
+                    color = np.concatenate([np.random.random(3), np.array([0.6])], axis=0)
+                else:
+                    color = np.array([30/255, 144/255, 255/255, 0.6])
+                h, w = mask.shape[-2:]
+                mask_image = mask.reshape(h, w, 1) * color.reshape(1, 1, -1)
+                ax.imshow(mask_image)
+    
+            def show_points(coords, labels, ax, marker_size=375):
+                pos_points = coords[labels==1]
+                neg_points = coords[labels==0]
+                ax.scatter(pos_points[:, 0], pos_points[:, 1], color='green', marker='*', s=marker_size, edgecolor='white', linewidth=1.25)
+                ax.scatter(neg_points[:, 0], neg_points[:, 1], color='red', marker='*', s=marker_size, edgecolor='white', linewidth=1.25) 
+
+            
+            if len(masks) > 1:
+                continue
+            import matplotlib.pyplot as plt
+            plt.imshow(image)
+            show_mask(mask[0], plt.gca())
+            show_points(input_points, input_labels, plt.gca())
+            plt.savefig("./masked_image_output.png")
+        
+        x = feat_map / feat_map.sum(-1, keepdim=True)
+        mask_final, feat_final = [], []
+        
+        for i in range(len(masks)):
+                        
+            mask_i = torch.tensor(masks[i][::2, ::2]).to(self.accelerator.device)
+            mask_i = mask_i.to(torch.float32)
+            mask_i_64 = mask_i[::4, ::4]
+            
+            score = compute_score(mask_i_64, eot_attn_mask)
+
+            ######
+            # filter
+            
+            print(score)
+            if True:
+                mean = x[mask_i_64.reshape(-1) > 0, :].mean(0)
+                mask_final.append(mask_i_64)
+                feat_final.append(mean)  
+                mask_i = transform(mask_i)
+                # mask_i.save(os.path.join(self.args.output_dir, 'attention/{}-step/mask_all{}.png'.format(global_step, i)))
+                mask_i.save(os.path.join(self.args.output_dir, 'attention/{}-step/sam_mask_all{}.png'.format(global_step, i)))
+                image_masked = self.vis_masked_image(pil, mask_i)
+                # image_masked.save(os.path.join(self.args.output_dir,'attention/{}-step/final_masked{}.png'.format(global_step, i)))
+                image_masked.save(os.path.join(self.args.output_dir,'attention/{}-step/sam_final_masked{}.png'.format(global_step, i)))
+    
+        return mask_final, feat_final
+
+
     @torch.no_grad()
     def perform_full_inference(self, path, guidance_scale=7.5):
         self.unet.eval()
