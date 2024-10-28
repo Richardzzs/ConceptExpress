@@ -1,11 +1,11 @@
 accelerate launch --num_processes 1 --main_process_port 20660 --gpu_ids 0, train.py \
   --seed 20 \
-  --instance_data_dir uce_images/69 \
+  --instance_data_dir uce_images/48 \
   --num_of_assets 50 \
   --merge_step 200 \
   --phase1_train_steps 500 \
   --phase2_train_steps 0 \
-  --output_dir ckpts/69/fusion_new24 \
+  --output_dir ckpts/48/fusion_new24 \
   --no_prior_preservation \
   --checkpointing_steps 100 \
   --initial_learning_rate 5e-4 \

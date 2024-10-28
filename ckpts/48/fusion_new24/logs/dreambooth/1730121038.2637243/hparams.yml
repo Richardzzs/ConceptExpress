@@ -1,0 +1,73 @@
+adam_beta1: 0.9
+adam_beta2: 0.999
+adam_epsilon: 1.0e-08
+adam_weight_decay: 0.01
+allow_tf32: false
+apply_masked_loss: true
+center_crop: false
+checkpointing_steps: 100
+class_data_dir: null
+class_prompt: a photo at the beach
+dataloader_num_workers: 0
+enable_xformers_memory_efficient_attention: false
+gradient_accumulation_steps: 1
+gradient_checkpointing: false
+hub_model_id: null
+hub_token: null
+img_log_steps: 200
+init_merge_rand: false
+initial_learning_rate: 0.0005
+initializer_tokens: ''
+instance_data_dir: uce_images/48
+instance_prompt: a photo of <asset0> and <asset1> and <asset2> and <asset3> and <asset4>
+  and <asset5> and <asset6> and <asset7> and <asset8> and <asset9> and <asset10> and
+  <asset11> and <asset12> and <asset13> and <asset14> and <asset15> and <asset16>
+  and <asset17> and <asset18> and <asset19> and <asset20> and <asset21> and <asset22>
+  and <asset23> and <asset24> and <asset25> and <asset26> and <asset27> and <asset28>
+  and <asset29> and <asset30> and <asset31> and <asset32> and <asset33> and <asset34>
+  and <asset35> and <asset36> and <asset37> and <asset38> and <asset39> and <asset40>
+  and <asset41> and <asset42> and <asset43> and <asset44> and <asset45> and <asset46>
+  and <asset47> and <asset48> and <asset49> and <asset*a> and <asset*b> and <asset*c>
+  and <asset*d> and <asset*e>
+lambda_attention: 1.0e-05
+learning_rate: 2.0e-06
+local_rank: -1
+log_checkpoints: false
+logging_dir: logs
+lr_num_cycles: 1
+lr_power: 1.0
+lr_scheduler: constant
+lr_warmup_steps: 0
+max_grad_norm: 1.0
+max_train_steps: 500
+merge_step: 200
+mixed_precision: fp16
+num_class_images: 100
+num_of_assets: 55
+num_rows: 1
+num_samples: 4
+num_split_tokens: 5
+num_train_epochs: 500
+output_dir: ckpts/48/fusion_new24
+phase1_train_steps: 500
+phase2_train_steps: 0
+placeholder_token: <asset>
+pretrained_model_name_or_path: stabilityai/stable-diffusion-2-1-base
+prior_generation_precision: null
+prior_loss_weight: 1.0
+report_to: tensorboard
+resolution: 512
+resume_from_checkpoint: null
+revision: null
+sample_batch_size: 4
+scale_lr: false
+seed: 20
+set_grads_to_none: false
+temperature: 0.07
+tokenizer_name: null
+train_batch_size: 1
+train_text_encoder: true
+use_8bit_adam: false
+vis_pca: false
+weight_contrast: 0.001
+with_prior_preservation: false
