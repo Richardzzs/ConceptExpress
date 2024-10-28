@@ -186,8 +186,8 @@ class AttentionStore(AttentionControl):
         else:
             for key in self.attention_store:
                 for i in range(len(self.attention_store[key])):
-                    print(self.attention_store[key][i])
-                    print(self.step_store[key][i])
+                    # print(self.attention_store[key][i])
+                    # print(self.step_store[key][i])
                     self.attention_store[key][i] += self.step_store[key][i]
         self.step_store = self.get_empty_store()
 

@@ -9,6 +9,7 @@ import itertools
 import logging
 import math
 import os
+os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
 import warnings
 from pathlib import Path
 from typing import List, Optional
@@ -616,7 +617,21 @@ class TokenManager():
         masks_to_use = [self.mask_list[tkn_i] for tkn_i in tokens_ids_to_use]
         feats_to_use = [self.feat_list[tkn_i] for tkn_i in tokens_ids_to_use]
         
-        token_ids = torch.tensor(tokens_ids_to_use)
+        if self.split_state:
+            num_split_tokens = self.num_split_tokens
+        else:
+            num_split_tokens = 1
+        
+        tokens_ids_global = []
+        for tokens_id in tokens_ids_to_use:
+            if tokens_id < len(self.ph_tokens_used) - num_split_tokens:
+                tokens_ids_global.append(tokens_id)
+            else:
+                tokens_ids_global.append(tokens_id + len(self.all_ph_tokens) - len(self.ph_tokens_used) - self.num_split_tokens + num_split_tokens)
+        # token_ids = torch.tensor(tokens_ids_to_use)
+        token_ids = torch.tensor(tokens_ids_global)
+
+        # token_ids = torch.tensor(tokens_ids_to_use)
         # print("token_ids: ", token_ids)
         if flip[0]:
             masks_to_use = self.flip_mask(masks_to_use)
@@ -976,8 +991,11 @@ class ConceptExpress:
                      + token_embeds[-3 * self.args.num_of_assets + tkn_idx]) / 2
                 
         else:
+            # TODO: Token initialization
             # Initialize new tokens randomly
             token_embeds = self.text_encoder.get_input_embeddings().weight.data
+            # print(token_embeds.shape)  # torch.Size([49463, 1024])
+            # print(type(token_embeds))  # <class 'torch.Tensor'>
             token_embeds[-self.args.num_of_assets :] = token_embeds[
                 -3 * self.args.num_of_assets : -2 * self.args.num_of_assets
             ]
@@ -1463,7 +1481,7 @@ class ConceptExpress:
                         _, model_pred = torch.chunk(model_pred, 2, dim=0)
                         _, target = torch.chunk(target, 2, dim=0)
                             
-                        if list_idx < self.token_manager.get_token_num() * self.args.num_split_tokens and self.args.apply_masked_loss:
+                        if self.args.apply_masked_loss:
                             max_mask = torch.max(
                                 masks_to_use, dim=0, keepdim=True
                             ).values.unsqueeze(1)
@@ -1479,42 +1497,6 @@ class ConceptExpress:
                         loss = F.mse_loss(
                             model_pred.float(), target.float(), reduction="mean"
                         )
-
-                        # optimize v* each time we calcualte it's mse with noise
-                        if list_idx > self.token_manager.get_token_num() * self.args.num_split_tokens - 1:
-                            self.accelerator.backward(loss)
-
-                            # No need to keep the attention store
-                            self.controller.attention_store = {}
-                            self.controller.cur_step = 0
-
-                            if self.accelerator.sync_gradients:
-                                params_to_clip = (
-                                    itertools.chain(
-                                        self.unet.parameters(), self.text_encoder.parameters()
-                                    )
-                                    if self.args.train_text_encoder
-                                    else self.unet.parameters()
-                                )
-                                self.accelerator.clip_grad_norm_(
-                                    params_to_clip, self.args.max_grad_norm
-                                )
-
-                            optimizer.step()
-                            lr_scheduler.step()
-                            optimizer.zero_grad(set_to_none=self.args.set_grads_to_none)
-
-                            if global_step < self.args.phase1_train_steps:
-                                with torch.no_grad():
-                                    self.accelerator.unwrap_model(
-                                        self.text_encoder
-                                    ).get_input_embeddings().weight[
-                                        : -self.args.num_of_assets
-                                    ] = orig_embeds_params[
-                                        : -self.args.num_of_assets
-                                    ]
-
-                            continue
 
                         # Attention loss
                         attn_loss = 0.
@@ -1537,15 +1519,11 @@ class ConceptExpress:
                             # print("length GT_feats", len(GT_feats))
                             for mask_id in range(len(GT_feats)):
                                 # print("token_ids", token_ids)
-                                if self.token_manager.split_state:
-                                    curr_placeholder_token_id = self.placeholder_token_ids[
-                                        token_ids[mask_id]
+
+                                curr_placeholder_token_id = self.placeholder_token_ids[
+                                    token_ids[mask_id]
                                 ]
-                                else:
-                                    _, now_ph_tokens_ids = self.token_manager.current_tokens(self.tokenizer)
-                                    curr_placeholder_token_id = now_ph_tokens_ids[
-                                        token_ids[mask_id]
-                                    ]
+
                                 # print("placeholder_token_ids", self.placeholder_token_ids)
                                 # print((
                                 #         prompt_ids[batch_idx]
@@ -2112,7 +2090,7 @@ class ConceptExpress:
         out = out.sum(0) / rw
         
         feat_map = out.reshape(64**2, 64**2)
-        mask_list, feat_list = self.cluster_attention(feat_map, eot_attn_mask, pil, global_step)
+        # mask_list, feat_list = self.cluster_attention(feat_map, eot_attn_mask, pil, global_step)
         mask_list, feat_list = self.mask_feat_calculation(feat_map, eot_attn_mask, pil, global_step)
         
         # assert False, "EXIT!"
@@ -2238,9 +2216,6 @@ class ConceptExpress:
         tsfm = transforms.Resize([256,256])
         downsampling = transforms.Resize([64,64])
         upsampling = transforms.Resize([512,512])
-        # mask = transform(eot_attn_mask)
-        # mask.save(os.path.join(self.args.output_dir, 'attention/{}-step/eot_attention.png'.format(global_step)))
-        
         
         eot_attn_mask = F.interpolate(
             input=eot_attn_mask[None, None], size=(64, 64), mode='bilinear'
@@ -2257,7 +2232,7 @@ class ConceptExpress:
         pil.save(os.path.join(self.args.output_dir, 'attention/{}-step/image.png'.format(global_step)))
         image = np.array(pil.convert("RGB"))
         
-        sam_checkpoint = "sam_vit_h_4b8939.pth"
+        sam_checkpoint = "/root/autodl-tmp/sam_vt_h.pth"
         model_type = "vit_h"
         device = "cuda"
         
@@ -2274,7 +2249,6 @@ class ConceptExpress:
             mask_clustering_256_np = np.expand_dims(mask_clustering_256_np, axis=0)
             mask_clustering_512 = upsampling(mask_clustering)
             mask_clustering_512_np = np.array(mask_clustering_512)
-            print(sum(mask_clustering_256_np[0]))
             
             indices = np.argwhere(mask_clustering_512_np > 0)
             indices = indices[:, ::-1]
@@ -2284,18 +2258,12 @@ class ConceptExpress:
             np.random.shuffle(row_rand_array)
             selected_indices = indices[row_rand_array[:k]]
             
-            # input_points = selected_indices
-            print(selected_indices)
-            print(selected_indices.shape)
             if len(masks) < 1:
                 input_points = np.array([[150,200],[150,300],[200,300]])
             else:
                 input_points = np.array([[320,200],[330,300],[340,130]])
-            print(input_points)
-            print(input_points.shape)
 
             input_labels = np.array([1] * k)
-            print(input_points)
             
             with torch.inference_mode():
                 predictor.set_image(image)
@@ -2347,7 +2315,7 @@ class ConceptExpress:
             ######
             # filter
             
-            print(score)
+            # print(score)
             if True:
                 mean = x[mask_i_64.reshape(-1) > 0, :].mean(0)
                 mask_final.append(mask_i_64)
