@@ -685,30 +685,31 @@ class TokenManager():
             token_ids_list.append(token_ids)
         
         if not self.split_state:
-
             # TODO: As for multiple tokens (cross attention via prompts)
+            # v0 and v1
             prompt_ids, tokens_to_use, masks_to_use, feats_to_use, token_ids = self.return_single_token([0, 1], flip, bsz)
             prompt_ids_list.append(prompt_ids)
             tokens_to_use_list.append(tokens_to_use)
-            masks_to_use_list.append(torch.full_like(masks_to_use_list[0], 1))
-            feats_to_use_list.append(torch.full_like(feats_to_use_list[0], 1))
+            masks_to_use_list.append(masks_to_use)
+            feats_to_use_list.append(feats_to_use)
             token_ids_list.append(token_ids)
 
+            # vi and v*
             for j in range(self.num_tokens, len(self.ph_tokens_used)):
                 for i in range(self.num_tokens):
                     prompt_ids, tokens_to_use, masks_to_use, feats_to_use, token_ids = self.return_single_token([i, j], flip, bsz)
                     prompt_ids_list.append(prompt_ids)
                     tokens_to_use_list.append(tokens_to_use)
-                    masks_to_use_list.append(torch.full_like(masks_to_use_list[0], 1))
-                    feats_to_use_list.append(torch.full_like(feats_to_use_list[0], 1))
+                    masks_to_use_list.append(masks_to_use)
+                    feats_to_use_list.append(feats_to_use)
                     token_ids_list.append(token_ids)
 
+            # v0 and v1 and v*
             prompt_ids, tokens_to_use, masks_to_use, feats_to_use, token_ids = self.return_single_token(list(range(len(self.ph_tokens_used))), flip, bsz)
-
             prompt_ids_list.append(prompt_ids)
             tokens_to_use_list.append(tokens_to_use)
-            masks_to_use_list.append(torch.full_like(masks_to_use_list[0], 1))
-            feats_to_use_list.append(torch.full_like(feats_to_use_list[0], 1))
+            masks_to_use_list.append(masks_to_use)
+            feats_to_use_list.append(feats_to_use)
             token_ids_list.append(token_ids)
 
             # [['<asset0>'], ['<asset1>'], ['<asset*a>'], ['<asset0>', '<asset*a>'], ['<asset1>', '<asset*a>'], ['<asset0>', '<asset1>', '<asset*a>']]
