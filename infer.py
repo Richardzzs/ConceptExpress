@@ -2,7 +2,8 @@
 Modified from:
     Break-A-Scene: https://github.com/google/break-a-scene
 """
-
+import os
+os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
 import argparse
 
 from diffusers import DiffusionPipeline, DDIMScheduler
@@ -13,7 +14,7 @@ import numpy as np
 from PIL import Image
 from ptp_utils import load_learned_embed
 from diffusers import StableDiffusionPipeline, DPMSolverMultistepScheduler
-import os
+
 
 def set_seed(seed: int):
     """

@@ -179,11 +179,15 @@ class AttentionStore(AttentionControl):
         return attn
 
     def between_steps(self):
+        if not self.update_attention:
+            return  # 如果不更新注意力，则跳过这一步
         if len(self.attention_store) == 0:
             self.attention_store = self.step_store
         else:
             for key in self.attention_store:
                 for i in range(len(self.attention_store[key])):
+                    # print(self.attention_store[key][i])
+                    # print(self.step_store[key][i])
                     self.attention_store[key][i] += self.step_store[key][i]
         self.step_store = self.get_empty_store()
 
@@ -198,11 +202,15 @@ class AttentionStore(AttentionControl):
         super(AttentionStore, self).reset()
         self.step_store = self.get_empty_store()
         self.attention_store = {}
-
+    
+    def set_update_attention(self, update):
+        self.update_attention = update
+    
     def __init__(self):
         super(AttentionStore, self).__init__()
         self.step_store = self.get_empty_store()
         self.attention_store = {}
+        self.update_attention = True  # 添加控制更新的标志
 
 
 class LocalBlend:
