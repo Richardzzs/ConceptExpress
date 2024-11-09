@@ -55,6 +55,8 @@ from utils.loss import SupConLoss, SupKLDiergence
 from utils.pca import pca_visual
 import json
 from segment_anything import sam_model_registry, SamPredictor
+import matplotlib.pyplot as plt
+
 
 check_min_version("0.12.0")
 
@@ -137,6 +139,20 @@ def parse_args(input_args=None):
     )
     parser.add_argument(
         "--instance_data_dir",
+        type=str,
+        default=None,
+        required=True,
+        help="A folder containing the training data of instance images.",
+    )
+    parser.add_argument(
+        "--instance_data_dir_2",
+        type=str,
+        default="uce_images/88",
+        required=True,
+        help="A folder containing the training data of instance images.",
+    )
+    parser.add_argument(
+        "--instance_data_dir_combined",
         type=str,
         default=None,
         required=True,
@@ -724,6 +740,8 @@ class DreamBoothDataset(Dataset):
     def __init__(
         self,
         instance_data_root,
+        instance_data_root_2,
+        instance_data_root_combined,
         size=512,
         center_crop=False,
         flip_p=0.5,
@@ -745,10 +763,25 @@ class DreamBoothDataset(Dataset):
             raise ValueError(
                 f"Instance {self.instance_data_root} images root doesn't exists."
             )
+        
+        self.instance_data_root_2 = Path(instance_data_root_2)
+        if not self.instance_data_root_2.exists():
+            raise ValueError(
+                f"Instance {self.instance_data_root_2} images root doesn't exists."
+            )
 
         instance_img_path = os.path.join(instance_data_root, "img.jpg")
+        instance_img_path_2 = os.path.join(instance_data_root_2, "img.jpg")
+        instance_img_path_combined = os.path.join(instance_data_root_combined, "img_combined.jpg")
+
         self.instance_image = self.image_transforms(Image.open(instance_img_path))
         self.instance_image_pil = Image.open(instance_img_path)
+
+        self.instance_image_2 = self.image_transforms(Image.open(instance_img_path_2))
+        self.instance_image_pil_2 = Image.open(instance_img_path_2)
+        
+        self.instance_image_combined = self.image_transforms(Image.open(instance_img_path_combined))
+        self.instance_image_pil_combined = Image.open(instance_img_path_combined)
 
         self._length = 1
         self.null_prompt = ""
@@ -758,30 +791,36 @@ class DreamBoothDataset(Dataset):
 
     def __getitem__(self, index):
         example = {}
-
-        
-        example["instance_images"] = self.instance_image
-        
+        example["instance_images_collection"] = [self.instance_image, self.instance_image_2, self.instance_image_combined]
         if random.random() > self.flip_p:
-            example["instance_images"] = TF.hflip(example["instance_images"])
+            example["instance_images_collection"] = [TF.hflip(img) for img in example["instance_images_collection"]]
             example["flip"] = True
         else:
             example["flip"] = False
-
         return example
 
 def collate_fn(examples):
-    pixel_values = [example["instance_images"] for example in examples]
-    
+    pixel_values_1 = [example["instance_images_collection"][0] for example in examples]
+    pixel_values_2 = [example["instance_images_collection"][1] for example in examples]
+    pixel_values_combined = [example["instance_images_collection"][2] for example in examples]
+
     flip = [example["flip"] for example in examples]
 
-    pixel_values = pixel_values + pixel_values
+    pixel_values_1 = pixel_values_1 + pixel_values_1
+    pixel_values_2 = pixel_values_2 + pixel_values_2
+    pixel_values_combined = pixel_values_combined + pixel_values_combined
 
-    pixel_values = torch.stack(pixel_values)
-    pixel_values = pixel_values.to(memory_format=torch.contiguous_format).float()
+    pixel_values_1 = torch.stack(pixel_values_1)
+    pixel_values_1 = pixel_values_1.to(memory_format=torch.contiguous_format).float()
+    pixel_values_2 = torch.stack(pixel_values_2)
+    pixel_values_2 = pixel_values_2.to(memory_format=torch.contiguous_format).float()
+    pixel_values_combined = torch.stack(pixel_values_combined)
+    pixel_values_combined = pixel_values_combined.to(memory_format=torch.contiguous_format).float()
 
     batch = {
-        "pixel_values": pixel_values,
+        "pixel_values_1": pixel_values_1,
+        "pixel_values_2": pixel_values_2,
+        "pixel_values_combined": pixel_values_combined,
         "flip": flip,
     }
     return batch
@@ -1029,6 +1068,8 @@ class ConceptExpress:
         # Dataset and DataLoaders creation:
         train_dataset = DreamBoothDataset(
             instance_data_root=self.args.instance_data_dir,
+            instance_data_root_2=self.args.instance_data_dir_2,
+            instance_data_root_combined=self.args.instance_data_dir_combined,
             size=self.args.resolution,
             center_crop=self.args.center_crop,
         )
@@ -1245,35 +1286,52 @@ class ConceptExpress:
                 
                 if global_step == 0:   
                     with torch.no_grad():
-                        latents = self.vae.encode(
-                            batch["pixel_values"].to(dtype=self.weight_dtype)
+                        latents_1 = self.vae.encode(
+                            batch["pixel_values_1"].to(dtype=self.weight_dtype)
                         ).latent_dist.sample()
-                        latents = latents * 0.18215
+                        latents_1 = latents_1 * 0.18215
+
+                        latents_2 = self.vae.encode(
+                            batch["pixel_values_2"].to(dtype=self.weight_dtype)
+                        ).latent_dist.sample()
+                        latents_2 = latents_2 * 0.18215
 
                         # Sample noise that we'll add to the latents
-                        noise = torch.randn_like(latents)
-                        bsz = latents.shape[0]
+                        noise_1 = torch.randn_like(latents_1)
+                        bsz_1 = latents_1.shape[0]
+                        noise_2 = torch.randn_like(latents_2)
+                        bsz_2 = latents_2.shape[0]
+
+                        bsz = bsz_1
                         # Sample a random timestep for each image
-                        timesteps = torch.LongTensor([0] * bsz).to(latents.device)
-                        
-                        null_input_ids = self.tokenizer(
-                            [""] * bsz,
+                        timesteps_1 = torch.LongTensor([0] * bsz_1).to(latents_1.device)
+                        null_input_ids_1 = self.tokenizer(
+                            [""] * bsz_1,
                             truncation=True,
                             padding="max_length",
                             max_length=self.tokenizer.model_max_length,
                             return_tensors="pt",
-                        ).input_ids
+                        ).input_ids.to(latents_1.device)
+
+                        timesteps_2 = torch.LongTensor([0] * bsz_2).to(latents_2.device)
+                        null_input_ids_2 = self.tokenizer(
+                            [""] * bsz_2,
+                            truncation=True,
+                            padding="max_length",
+                            max_length=self.tokenizer.model_max_length,
+                            return_tensors="pt",
+                        ).input_ids.to(latents_2.device)
 
                         # Get the text embedding for conditioning
-                        null_input_ids = null_input_ids.to(latents.device)
-                        encoder_hidden_states = self.text_encoder(null_input_ids)[0]
+                        encoder_hidden_states_1 = self.text_encoder(null_input_ids_1)[0]
+                        encoder_hidden_states_2 = self.text_encoder(null_input_ids_2)[0]
 
                         # Predict the noise residual
-                        model_pred = self.unet(
-                            latents, timesteps, encoder_hidden_states
+                        model_pred_1 = self.unet(
+                            latents_1, timesteps_1, encoder_hidden_states_1
                         ).sample
 
-                        agg_attn = self.aggregate_attention(
+                        agg_attn_1 = self.aggregate_attention(
                                 res=16,
                                 from_where=("up", "down"),
                                 is_cross=True,
@@ -1282,16 +1340,54 @@ class ConceptExpress:
                         
                         eot_idx = (
                                 (
-                                    null_input_ids[0]== 49407
+                                    null_input_ids_1[0]== 49407
                                 )
                                 .nonzero()
                                 .item()
                             )
-                        eot_attn_mask = agg_attn[..., eot_idx]
+                        eot_attn_mask_1 = agg_attn_1[..., eot_idx]
                             
                         # if self.accelerator.is_main_process:
-                        mask_list, feat_list = self.get_self_attention(eot_attn_mask, batch["pixel_values"][0], global_step)
+                        mask_list_1, feat_list_1 = self.get_self_attention(eot_attn_mask_1, batch["pixel_values_1"][0], global_step, 1)
+
+                        # Need to clear the attention store
+                        self.controller.attention_store = {}
+                        self.controller.cur_step = 0
+
+                        # Predict the noise residual
+                        model_pred_2 = self.unet(
+                            latents_2, timesteps_2, encoder_hidden_states_2
+                        ).sample
+                        agg_attn_2 = self.aggregate_attention(
+                                res=16,
+                                from_where=("up", "down"),
+                                is_cross=True,
+                                select=0,
+                            )
                         
+                        eot_idx = (
+                                (
+                                    null_input_ids_2[0]== 49407
+                                )
+                                .nonzero()
+                                .item()
+                            )
+                        eot_attn_mask_2 = agg_attn_2[..., eot_idx]
+
+                        mask_list_2, feat_list_2 = self.get_self_attention(eot_attn_mask_2, batch["pixel_values_2"][0], global_step, 2)
+
+                        # print("Please refer to image 1 masked outputs")
+                        # concept_index_1 = int(input("And select a concept in image 1: ")) - 1
+                        concept_index_1 = 1
+                        
+                        # print("Please refer to image 2 masked outputs")
+                        # concept_index_2 = int(input("And select a concept in image 2: ")) - 1
+                        concept_index_2 = 1
+                        
+                        mask_list = [mask_list_1[concept_index_1]] + [mask_list_2[concept_index_2]] # "+" for mask1 and mask2 combine to the mask_final
+        
+                        feat_list = [feat_list_1[concept_index_1]] + [feat_list_2[concept_index_2]] # how to operate to retrieve only one object? is [0] useful?
+
                         self.token_manager.update_mask(mask_list, feat_list, batch["flip"])
                         
                         # No need to keep the attention store
@@ -1328,7 +1424,7 @@ class ConceptExpress:
                         ).get_input_embeddings().weight.data[
                             -self.args.num_of_assets+i
                         ] = new_embed / self.args.num_split_tokens
-                    # as for v*
+                    # as for v* [asset*a, asset*b, asset*c, asset*d, asset*e]
                     new_embed = 0.
                     for i in range(self.args.num_split_tokens):
                         new_embed += embed_add[-self.args.num_split_tokens+i]                        
@@ -1393,9 +1489,45 @@ class ConceptExpress:
                                 masks_to_use_list[list_idx], feats_to_use_list[list_idx], token_ids_list[list_idx]
                         # len(prompt_ids_list) = 15
                         # Convert images to latent space
-                        latents = self.vae.encode(
-                            batch["pixel_values"].to(dtype=self.weight_dtype)
-                        ).latent_dist.sample()
+                        if self.token_manager.split_state:
+                            if list_idx < self.token_manager.get_token_num() * self.args.num_split_tokens:
+                                if list_idx % self.token_manager.get_token_num() == 0:
+                                    image_index = 1
+                                else:
+                                    image_index = 2
+                            else:
+                                if global_step % 2 == 0:
+                                    image_index = 1
+                                else:
+                                    image_index = 2
+                        else:
+                            if list_idx == 0: # v1
+                                image_index = 1
+                            elif list_idx == 1: # v2
+                                image_index = 2
+                            elif list_idx == 2: # v*
+                                if global_step % 2 == 0:
+                                    image_index = 1
+                                else:
+                                    image_index = 2
+                            elif list_idx == 3: # v1 and v2
+                                image_index = 3
+                            else: # v1 and v*, v2 and v*, v1 and v2 and v*
+                                image_index = 3
+                        
+                        if image_index == 1:
+                            latents = self.vae.encode(
+                                batch["pixel_values_1"].to(dtype=self.weight_dtype)
+                            ).latent_dist.sample()
+                        elif image_index == 2:
+                            latents = self.vae.encode(
+                                batch["pixel_values_2"].to(dtype=self.weight_dtype)
+                            ).latent_dist.sample()
+                        elif image_index == 3:
+                            latents = self.vae.encode(
+                                batch["pixel_values_combined"].to(dtype=self.weight_dtype)
+                            ).latent_dist.sample()
+
                         latents = latents * 0.18215
 
                         # Sample noise that we'll add to the latents
@@ -1444,10 +1576,23 @@ class ConceptExpress:
                                 masks_to_use, dim=0, keepdim=True
                             ).values.unsqueeze(1)
                             
-                            max_mask_np = T.ToPILImage()(max_mask.reshape(64,64))
-                            pil = (batch["pixel_values"][0] * 0.5 + 0.5) 
-                            pil = T.ToPILImage()(pil)
-                            image_masked_save = self.vis_masked_image(pil, max_mask_np)
+                            # max_mask_np = T.ToPILImage()(max_mask.reshape(64,64))
+
+                            # if image_index == 1:
+                            #     pil = (batch["pixel_values_1"][0] * 0.5 + 0.5)
+                            #     pil = T.ToPILImage()(pil)
+                            #     image_masked_save = self.vis_masked_image(pil, max_mask_np)
+                            #     image_masked_save.save(f"image_{image_index:02}_masked.jpg")
+                            # elif image_index == 2:
+                            #     pil = (batch["pixel_values_2"][0] * 0.5 + 0.5)
+                            #     pil = T.ToPILImage()(pil)
+                            #     image_masked_save = self.vis_masked_image(pil, max_mask_np)
+                            #     image_masked_save.save(f"image_{image_index:02}_masked.jpg")
+                            # elif image_index == 3:
+                            #     pil = (batch["pixel_values_combined"][0] * 0.5 + 0.5)
+                            #     pil = T.ToPILImage()(pil)
+                            #     image_masked_save = self.vis_masked_image(pil, max_mask_np)
+                            #     image_masked_save.save(f"image_{image_index:02}_masked.jpg")
 
                             model_pred = model_pred * max_mask
                             target = target * max_mask
@@ -1648,9 +1793,32 @@ class ConceptExpress:
                                 token_ids_list[-random.randint(id_start, id_end)]
                             
                             # Convert images to latent space
-                            latents = self.vae.encode(
-                                batch["pixel_values"].to(dtype=self.weight_dtype)
-                            ).latent_dist.sample()
+                            if self.token_manager.split_state:
+                                if list_idx % self.token_manager.get_token_num() == 0:
+                                    image_index = 1
+                                else:
+                                    image_index = 2
+                            else:
+                                if list_idx == 0:
+                                    image_index = 1
+                                if list_idx == 1:
+                                    image_index = 2
+                                else:
+                                    image_index = 3
+                            
+                            if image_index == 1:
+                                latents = self.vae.encode(
+                                    batch["pixel_values_1"].to(dtype=self.weight_dtype)
+                                ).latent_dist.sample()
+                            elif image_index == 2:
+                                latents = self.vae.encode(
+                                    batch["pixel_values_2"].to(dtype=self.weight_dtype)
+                                ).latent_dist.sample()
+                            elif image_index == 3:
+                                latents = self.vae.encode(
+                                    batch["pixel_values_combined"].to(dtype=self.weight_dtype)
+                                ).latent_dist.sample()
+                                
                             latents = latents * 0.18215
 
                             # Sample noise that we'll add to the latents
@@ -1718,10 +1886,14 @@ class ConceptExpress:
                                     masks_to_use, dim=0, keepdim=True
                                 ).values.unsqueeze(1)
                             
-                                max_mask_np = T.ToPILImage()(max_mask.reshape(64,64))
-                                pil = (batch["pixel_values"][0] * 0.5 + 0.5) 
-                                pil = T.ToPILImage()(pil)
-                                image_masked_save = self.vis_masked_image(pil, max_mask_np)
+                                # max_mask_np = T.ToPILImage()(max_mask.reshape(64,64))
+                                # if image_index == 1:
+                                #     pil = (batch["pixel_values_1"][0] * 0.5 + 0.5) 
+                                # elif image_index == 2:
+                                #     pil = (batch["pixel_values_2"][0] * 0.5 + 0.5) 
+
+                                # pil = T.ToPILImage()(pil)
+                                # image_masked_save = self.vis_masked_image(pil, max_mask_np)
 
                                 model_pred_detached = model_pred_detached * max_mask
                                 # target = target * max_mask
@@ -1933,7 +2105,7 @@ class ConceptExpress:
         out = out.sum(0) / out.shape[0]
         return out
 
-    def get_self_attention(self, eot_attn_mask, pil, global_step):
+    def get_self_attention(self, eot_attn_mask, pil, global_step, image_index):
         pil = (pil * 0.5 + 0.5)
         out = []
         rw = 0.
@@ -1965,15 +2137,15 @@ class ConceptExpress:
         out = out.sum(0) / rw
         
         feat_map = out.reshape(64**2, 64**2)
-        mask_list, feat_list = self.mask_feat_calculation(feat_map, eot_attn_mask, pil, global_step)
+        mask_list, feat_list = self.mask_feat_calculation(feat_map, eot_attn_mask, pil, global_step, image_index)
         
         # assert False, "EXIT!"
         return mask_list, feat_list
     
-    def cluster_attention(self, feat_map, eot_attn_mask, pil, global_step): # (HW) * (HW)
+    def cluster_attention(self, feat_map, eot_attn_mask, pil, global_step, image_index): # (HW) * (HW)
         
-        if not os.path.exists(os.path.join(self.args.output_dir, "attention/{}-step".format(global_step))):
-            os.makedirs(os.path.join(self.args.output_dir, "attention/{}-step".format(global_step)), exist_ok=True)
+        if not os.path.exists(os.path.join(self.args.output_dir, "attention/{}-step/image_{}".format(global_step, image_index))):
+            os.makedirs(os.path.join(self.args.output_dir, "attention/{}-step/image_{}".format(global_step, image_index)), exist_ok=True)
             
         x = feat_map / feat_map.sum(-1, keepdim=True)
         
@@ -2000,10 +2172,10 @@ class ConceptExpress:
         
         transform = T.ToPILImage()
         mask = transform(eot_attn_mask)
-        mask.save(os.path.join(self.args.output_dir, 'attention/{}-step/eot_attention.png'.format(global_step)))
+        mask.save(os.path.join(self.args.output_dir, 'attention/{}-step/image_{}/eot_attention.png'.format(global_step, image_index)))
         
         pil = transform(pil)
-        pil.save(os.path.join(self.args.output_dir, 'attention/{}-step/image.png'.format(global_step)))
+        pil.save(os.path.join(self.args.output_dir, 'attention/{}-step/image_{}/image.png'.format(global_step, image_index)))
         
         mask_candidate = []
         feat_candidate = []
@@ -2018,7 +2190,7 @@ class ConceptExpress:
             
             ### save all masks
             mask_pil = transform(mask)
-            mask_pil.save(os.path.join(self.args.output_dir, 'attention/{}-step/mask_phase1_all{}.png'.format(global_step, i)))
+            mask_pil.save(os.path.join(self.args.output_dir, 'attention/{}-step/image_{}/mask_phase1_all{}.png'.format(global_step, image_index, i)))
             ##################
             
             if score > 1.0:
@@ -2030,15 +2202,15 @@ class ConceptExpress:
                 feat_max_candidate.append(feat_max)
                 
                 mask = transform(mask)
-                mask.save(os.path.join(self.args.output_dir, 'attention/{}-step/self-attention_candidate{}.png'.format(global_step, i)))
+                mask.save(os.path.join(self.args.output_dir, 'attention/{}-step/image_{}/self-attention_candidate{}.png'.format(global_step, image_index, i)))
                 
                 image_masked = self.vis_masked_image(pil, mask)
                 
-                image_masked.save(os.path.join(self.args.output_dir, 'attention/{}-step/masked_candidate{}.png'.format(global_step, i)))
+                image_masked.save(os.path.join(self.args.output_dir, 'attention/{}-step/image_{}/masked_candidate{}.png'.format(global_step, image_index, i)))
                 
                 norm = mean / mean.max()
                 norm = transform(norm.reshape(64,64))
-                norm.save(os.path.join(self.args.output_dir, 'attention/{}-step/self-attention-mean{}.png'.format(global_step, i)))
+                norm.save(os.path.join(self.args.output_dir, 'attention/{}-step/image_{}/self-attention-mean{}.png'.format(global_step, image_index, i)))
         
         mask_mat = torch.stack(mask_candidate, dim=0).detach()
         feat_mat = torch.stack(feat_candidate, dim=0).detach()
@@ -2064,22 +2236,22 @@ class ConceptExpress:
             feat_final.append(feat_i)
             
             mask_i = transform(mask_i)
-            mask_i.save(os.path.join(self.args.output_dir,'attention/{}-step/final_attention{}.png'.format(global_step, i)))
+            mask_i.save(os.path.join(self.args.output_dir,'attention/{}-step/image_{}/final_attention{}.png'.format(global_step, image_index, i)))
             
             image_masked = self.vis_masked_image(pil, mask_i)
             
-            image_masked.save(os.path.join(self.args.output_dir,'attention/{}-step/final_masked{}.png'.format(global_step, i)))
+            image_masked.save(os.path.join(self.args.output_dir,'attention/{}-step/image_{}/final_masked{}.png'.format(global_step, image_index, i)))
             
             norm = feat_i / feat_i.max()
             norm = transform(norm.reshape(64,64))
-            norm.save(os.path.join(self.args.output_dir,'attention/{}-step/final_mean{}.png'.format(global_step, i)))
+            norm.save(os.path.join(self.args.output_dir,'attention/{}-step/image_{}/final_mean{}.png'.format(global_step, image_index, i)))
         
         return mask_final, feat_final
     
 
-    def mask_feat_calculation(self, feat_map, eot_attn_mask, pil, global_step):
+    def mask_feat_calculation(self, feat_map, eot_attn_mask, pil, global_step, image_index):
     
-        mask_list_clustering, feat_list_clustering = self.cluster_attention(feat_map, eot_attn_mask, pil, global_step)
+        mask_list_clustering, feat_list_clustering = self.cluster_attention(feat_map, eot_attn_mask, pil, global_step, image_index)
         
         transform = T.ToPILImage()
         tsfm = transforms.Resize([256,256])
@@ -2108,9 +2280,33 @@ class ConceptExpress:
         sam = sam_model_registry[model_type](checkpoint=sam_checkpoint)
         sam.to(device=device)
         predictor = SamPredictor(sam)
+
+        k = 3
+        user_define_input = False
         
+        plt.cla()
+        plt.imshow(image)
+        plt.savefig("./image_{:d}.png".format(image_index))
+        
+        if user_define_input:
+            print("There are {:d} concepts in image {:d}\n".format(len(mask_list_clustering), image_index))
+            print("Please refer to image_{:d}.png\n".format(image_index))
+        
+            cocept_prompt_collection = []
+            for i in range(len(mask_list_clustering)):
+                cocept_prompt = []
+                print("And input {:d} points for concept {:d}\n".format(k, i+1))
+                for j in range(k):
+                    x, y = input("Point {:d}: ".format(j+1)).split(" ")
+                    input_points = (int(x), int(y))
+                    cocept_prompt.append((x, y))
+                cocept_prompt = np.array(cocept_prompt)
+                cocept_prompt_collection.append(cocept_prompt)
+
         masks = []
-        for mask_clustering_tensor in mask_list_clustering:
+        for i in range(len(mask_list_clustering)):
+            
+            mask_clustering_tensor = mask_list_clustering[i]
             
             mask_clustering = transform(mask_clustering_tensor)
             mask_clustering_256 = tsfm(mask_clustering)
@@ -2121,16 +2317,47 @@ class ConceptExpress:
             
             indices = np.argwhere(mask_clustering_512_np > 0)
             indices = indices[:, ::-1]
-            k = 3
 
             row_rand_array = np.arange(indices.shape[0])
             np.random.shuffle(row_rand_array)
             selected_indices = indices[row_rand_array[:k]]
             
-            if len(masks) < 1:
-                input_points = np.array([[150,200],[150,300],[200,300]])
-            else:
-                input_points = np.array([[320,200],[330,300],[340,130]])
+            # #############
+            # ### 78 88 ###
+            # if image_index == 1:
+            #     if i == 0:
+            #         input_points = np.array([[150,200],[150,300],[200,300]])
+            #     elif i == 1:
+            #         input_points = np.array([[320,200],[330,300],[340,130]])
+            # elif image_index == 2:
+            #     if i == 0:
+            #         input_points = np.array([[100,150],[100,400],[170,300]])
+            #     elif i == 1:
+            #         input_points = np.array([[150,470],[200,430],[300,470]])
+            #     elif i == 2:
+            #         input_points = np.array([[350,450],[400,400],[470,400]])
+            # ### 78 88 ###
+            # #############
+
+            #############
+            ### 48 60 ###
+            if image_index == 1:
+                if i == 0:
+                    input_points = np.array([[100,200],[150,300],[200,300]])
+                elif i == 1:
+                    input_points = np.array([[350,200],[360,300],[370,380]])
+            elif image_index == 2:
+                if i == 0:
+                    input_points = np.array([[180,200],[200,230],[220,300]])
+                elif i == 1:
+                    input_points = np.array([[320,220],[330,300],[350,400]])
+                elif i == 2:
+                    input_points = np.array([[350,450],[400,400],[470,400]])
+            ### 48 60 ###
+            #############
+
+            if user_define_input :
+                input_points = cocept_prompt_collection[i]
 
             input_labels = np.array([1] * k)
             
@@ -2161,14 +2388,11 @@ class ConceptExpress:
                 ax.scatter(pos_points[:, 0], pos_points[:, 1], color='green', marker='*', s=marker_size, edgecolor='white', linewidth=1.25)
                 ax.scatter(neg_points[:, 0], neg_points[:, 1], color='red', marker='*', s=marker_size, edgecolor='white', linewidth=1.25) 
 
-            
-            if len(masks) > 1:
-                continue
-            import matplotlib.pyplot as plt
+            plt.cla()
             plt.imshow(image)
             show_mask(mask[0], plt.gca())
             show_points(input_points, input_labels, plt.gca())
-            plt.savefig("./masked_image_output.png")
+            plt.savefig("./image_{:d}_masked_concept_{:d}.png".format(image_index, len(masks)))
         
         x = feat_map / feat_map.sum(-1, keepdim=True)
         mask_final, feat_final = [], []
@@ -2191,10 +2415,10 @@ class ConceptExpress:
                 feat_final.append(mean)  
                 mask_i = transform(mask_i)
                 # mask_i.save(os.path.join(self.args.output_dir, 'attention/{}-step/mask_all{}.png'.format(global_step, i)))
-                mask_i.save(os.path.join(self.args.output_dir, 'attention/{}-step/sam_mask_all{}.png'.format(global_step, i)))
+                mask_i.save(os.path.join(self.args.output_dir, 'attention/{}-step/image_{}/sam_mask_all{}.png'.format(global_step, image_index, i)))
                 image_masked = self.vis_masked_image(pil, mask_i)
                 # image_masked.save(os.path.join(self.args.output_dir,'attention/{}-step/final_masked{}.png'.format(global_step, i)))
-                image_masked.save(os.path.join(self.args.output_dir,'attention/{}-step/sam_final_masked{}.png'.format(global_step, i)))
+                image_masked.save(os.path.join(self.args.output_dir,'attention/{}-step/image_{}/sam_final_masked{}.png'.format(global_step, image_index, i)))
     
         return mask_final, feat_final
 

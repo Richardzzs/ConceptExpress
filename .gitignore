@@ -1,6 +1,7 @@
 __pycache__
 */__pycache__
 uce_images/
+test_images/
 ckpts/
 temp/
 output_48/
